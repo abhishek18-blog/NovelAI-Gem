@@ -369,7 +369,8 @@ export default function App() {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden font-sans">
+   /* FIXED: Changed h-screen to h-[100dvh] for mobile browser support */
+    <div className="flex flex-col h-[100dvh] bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden font-sans">
       
       {/* MOBILE HEADER */}
       <header className="md:hidden sticky top-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 z-40 px-4 py-3 flex justify-between items-center">
@@ -387,7 +388,7 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 overflow-hidden relative">
-        {/* DESKTOP SIDEBAR */}
+        {/* DESKTOP SIDEBAR (Unchanged) */}
         <nav className="hidden md:flex w-20 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center py-8 gap-8 bg-white dark:bg-zinc-900 z-50">
           <div className="p-3 bg-amber-500 rounded-2xl text-white shadow-lg shadow-amber-500/20 transition-transform hover:scale-105"><BookOpen size={24}/></div>
           <NavItem id="library" icon={Library} label="Library" />
@@ -395,16 +396,17 @@ export default function App() {
           <NavItem id="chat" icon={MessageSquare} label="Chat" />
           <NavItem id="navigator" icon={Layers} label="Pages" />
           <div className="mt-auto flex flex-col gap-4">
-            <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-3 text-zinc-400 hover:text-amber-500 transition-colors" title="Toggle Theme">
+            <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-3 text-zinc-400 hover:text-amber-500 transition-colors">
               {theme === 'dark' ? <Sun size={20}/> : <Moon size={20}/>}
             </button>
-            <button onClick={hardReset} className="p-3 text-zinc-400 hover:text-red-500 transition-colors" title="Factory Reset">
+            <button onClick={hardReset} className="p-3 text-zinc-400 hover:text-red-500 transition-colors">
               <RefreshCw size={20}/>
             </button>
           </div>
         </nav>
 
-        {/* READING AREA */}
+       {/* READING AREA */}
+        {/* FIXED: Added pb-32 to ensure text doesn't hide behind mobile nav */}
         <main className="flex-1 overflow-y-auto px-4 md:px-20 py-8 scroll-smooth relative custom-scrollbar bg-zinc-50 dark:bg-zinc-950">
           <div className="max-w-3xl mx-auto">
             <div className="hidden md:flex justify-between items-end border-b border-zinc-200 dark:border-zinc-800 pb-6 mb-12">
@@ -414,20 +416,12 @@ export default function App() {
                   Progress: Page {currentPage + 1} of {pages.length} ({readProgress}%)
                 </p>
               </div>
-              {user && (
-                <div className="text-[10px] font-bold text-emerald-500 flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-1.5 rounded-full border border-emerald-100 dark:border-emerald-900/50">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/> 
-                  Session Active
-                </div>
-              )}
             </div>
 
             <div className="space-y-12 pb-32">
               {pages.map((p, i) => (
-                <article 
-                  key={i} id={`page-${i}`} data-page-index={i}
-                  className="bg-white dark:bg-zinc-900 p-8 md:p-16 rounded-[2rem] border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all hover:shadow-md relative group selection:bg-amber-100 dark:selection:bg-amber-900/50"
-                >
+                <article key={i} id={`page-${i}`} data-page-index={i}
+                  className="bg-white dark:bg-zinc-900 p-8 md:p-16 rounded-[2rem] border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all hover:shadow-md relative group selection:bg-amber-100 dark:selection:bg-amber-900/50">
                   <span className="absolute top-6 right-8 text-[10px] font-black text-zinc-200 dark:text-zinc-800 uppercase tracking-widest transition-colors group-hover:text-amber-500">Page {i + 1}</span>
                   <div className="font-serif text-lg md:text-xl leading-relaxed text-zinc-800 dark:text-zinc-300 whitespace-pre-wrap select-text">
                     {p}
@@ -438,120 +432,150 @@ export default function App() {
           </div>
         </main>
 
+        
         {/* FUNCTIONAL DRAWER */}
-        <aside className={`fixed inset-0 md:relative md:inset-auto z-[100] md:z-auto transition-all duration-300 overflow-hidden flex
-          ${isSidebarOpen ? 'w-full md:w-[420px]' : 'w-0'}`}>
-          <div className="flex-1 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 flex flex-col shadow-2xl md:shadow-none">
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-950/20">
-              <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{activeTab}</h2>
-              <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"><X size={20}/></button>
+      <aside className={`fixed inset-0 md:relative md:inset-auto z-[100] md:z-auto transition-all duration-300 overflow-hidden flex
+  ${isSidebarOpen ? 'w-full md:w-[420px]' : 'w-0'}`}>
+  <div className="flex-1 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 flex flex-col shadow-2xl md:shadow-none h-full">
+    
+    {/* HEADER */}
+    <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-950/20">
+      <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{activeTab}</h2>
+      <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors">
+        <X size={20}/>
+      </button>
+    </div>
+
+    {/* CONTENT AREA */}
+    {/* Added pb-28 to ensure content isn't covered by the bottom mobile nav bar */}
+    <div className="flex-1 overflow-y-auto p-6 pb-28 md:pb-6 relative custom-scrollbar">
+      
+      {activeTab === 'library' && (
+        <div className="space-y-6">
+          {!user || user.isAnonymous ? (
+            <div className="space-y-4 py-8 text-center">
+              <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto text-amber-500 mb-2">
+                <User size={32}/>
+              </div>
+              <p className="text-sm text-zinc-500 px-4">Sign in with Google to sync manuscripts across devices.</p>
+              <button 
+                onClick={handleGoogleSignIn} 
+                disabled={isSigningIn}
+                className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
+              >
+                {isSigningIn ? <Loader2 className="animate-spin" size={16} /> : <LogIn size={16} />}
+                {isSigningIn ? "Authorizing..." : "Continue with Google"}
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              {activeTab === 'library' && (
-                <div className="space-y-6">
-                  {!user || user.isAnonymous ? (
-                    <div className="space-y-4 py-8 text-center">
-                      <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto text-amber-500 mb-2"><User size={32}/></div>
-                      <p className="text-sm text-zinc-500 px-4">Sign in with Google to sync manuscripts across devices.</p>
-                      <button 
-                        onClick={handleGoogleSignIn} 
-                        disabled={isSigningIn}
-                        className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
-                      >
-                        {isSigningIn ? <Loader2 className="animate-spin" size={16} /> : <LogIn size={16} />}
-                        {isSigningIn ? "Authorizing..." : "Continue with Google"}
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <label className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl hover:border-amber-500 cursor-pointer transition-all group">
-                        <FileUp size={32} className="text-zinc-300 group-hover:text-amber-500 mb-2 transition-colors"/>
-                        <span className="text-[10px] font-black uppercase text-zinc-500">Upload PDF</span>
-                        <input type="file" onChange={handleFileUpload} className="hidden" accept=".pdf" />
-                      </label>
-                      <div className="space-y-3">
-                        <h3 className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Collections</h3>
-                        {sources.map(s => (
-                          <div key={s.id} className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${currentDocId === s.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/10' : 'border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
-                            <button onClick={() => { setText(s.content); setCurrentDocName(s.name); setCurrentDocId(s.id); setIsSidebarOpen(false); isInitialLoad.current = true; }} className="flex-1 text-left min-w-0">
-                              <p className="text-xs font-bold truncate">{s.name}</p>
-                              <p className="text-[10px] text-zinc-400 mt-1">{s.date}</p>
-                            </button>
-                            <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sources', s.id))} className="text-zinc-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
-                          </div>
-                        ))}
-                      </div>
-                      <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 dark:border-zinc-800 rounded-xl hover:text-red-500 transition-colors mt-8">Sign Out</button>
-                    </>
-                  )}
-                </div>
-              )}
-              {activeTab === 'insights' && (
-                <div className="space-y-6">
-                  <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-700">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Translation Language</label>
-                    <div className="flex gap-2">
-                      <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs">
-                        {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-                      </select>
-                      <button onClick={handleTranslate} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-[10px] font-black uppercase transition-transform active:scale-95 shadow-md">Translate Selection</button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button onClick={() => handleInsight('summary')} className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl flex flex-col items-center gap-2 border border-amber-100 dark:border-amber-900/50 active:scale-95 transition-transform">
-                      <BrainCircuit size={24} className="text-amber-500" /><span className="text-[9px] font-black uppercase tracking-widest">Summary</span>
+          ) : (
+            <>
+              <label className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl hover:border-amber-500 cursor-pointer transition-all group">
+                <FileUp size={32} className="text-zinc-300 group-hover:text-amber-500 mb-2 transition-colors"/>
+                <span className="text-[10px] font-black uppercase text-zinc-500">Upload PDF</span>
+                <input type="file" onChange={handleFileUpload} className="hidden" accept=".pdf" />
+              </label>
+              <div className="space-y-3">
+                <h3 className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Collections</h3>
+                {sources.map(s => (
+                  <div key={s.id} className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${currentDocId === s.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/10' : 'border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
+                    <button onClick={() => { setText(s.content); setCurrentDocName(s.name); setCurrentDocId(s.id); setIsSidebarOpen(false); isInitialLoad.current = true; }} className="flex-1 text-left min-w-0">
+                      <p className="text-xs font-bold truncate">{s.name}</p>
+                      <p className="text-[10px] text-zinc-400 mt-1">{s.date}</p>
                     </button>
-                    <button onClick={() => handleInsight('characters')} className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-2xl flex flex-col items-center gap-2 border border-blue-100 dark:border-blue-900/50 active:scale-95 transition-transform">
-                      <User size={24} className="text-blue-500" /><span className="text-[9px] font-black uppercase tracking-widest">Characters</span>
-                    </button>
-                    <button onClick={() => handleInsight('weaver')} className="p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl flex flex-col items-center gap-2 border border-purple-100 dark:border-purple-900/50 active:scale-95 transition-transform col-span-2">
-                      <Wand2 size={24} className="text-purple-500" /><span className="text-[9px] font-black uppercase tracking-widest">Story Weaver</span>
+                    <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sources', s.id))} className="text-zinc-300 hover:text-red-500 transition-colors">
+                      <Trash2 size={16}/>
                     </button>
                   </div>
-                  {insightResult && (
-                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-3xl border border-zinc-200 dark:border-zinc-700 animate-in fade-in slide-in-from-bottom-2 duration-500 shadow-sm">
-                      <div className="text-sm leading-relaxed whitespace-pre-wrap font-serif text-zinc-800 dark:text-zinc-200">{insightResult}</div>
-                      <button onClick={() => {
-                        setChatHistory(prev => [...prev, {role:'bot', content: `**✨ Magic Insight (${insightType}):**\n${insightResult}`}]);
-                        setActiveTab('chat');
-                      }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 dark:border-amber-900 rounded-xl hover:bg-amber-50 transition-colors">Add to Chat Session</button>
-                    </div>
-                  )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Consulting the Muse...</p></div>}
-                </div>
-              )}
-              {activeTab === 'chat' && (
-                <div className="flex flex-col h-full space-y-4">
-                  <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30 px-6"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase tracking-widest">Ask about characters, themes, or plot points.</p></div>}
-                    {chatHistory.map((m, i) => (
-                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-tl-none border border-zinc-200 dark:border-zinc-700'}`}>
-                          {m.content}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="relative pt-2">
-                    <input value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleChat()} placeholder="Ask Gemini..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
-                    <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg hover:bg-amber-600 active:scale-90 transition-all"><Send size={18}/></button>
-                  </div>
-                </div>
-              )}
-              {activeTab === 'navigator' && (
-                <div className="grid grid-cols-4 gap-3">
-                  {pages.map((_, i) => (
-                    <button key={i} onClick={() => scrollToPage(i)} className={`aspect-square rounded-2xl border-2 flex items-center justify-center text-xs font-black transition-all ${currentPage === i ? 'bg-amber-500 text-white border-amber-500 shadow-xl scale-110' : 'border-zinc-100 dark:border-zinc-800 hover:border-amber-200'}`}>
-                      {i + 1}
-                    </button>
-                  ))}
-                </div>
-              )}
+                ))}
+              </div>
+              <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 dark:border-zinc-800 rounded-xl hover:text-red-500 transition-colors mt-8">Sign Out</button>
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'insights' && (
+        <div className="space-y-6">
+          <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-700">
+            <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Translation Language</label>
+            <div className="flex gap-2">
+              <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs">
+                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+              </select>
+              <button onClick={handleTranslate} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-[10px] font-black uppercase transition-transform active:scale-95 shadow-md">Translate</button>
             </div>
           </div>
-        </aside>
-      </div>
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={() => handleInsight('summary')} className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl flex flex-col items-center gap-2 border border-amber-100 dark:border-amber-900/50 active:scale-95 transition-transform">
+              <BrainCircuit size={24} className="text-amber-500" /><span className="text-[9px] font-black uppercase tracking-widest">Summary</span>
+            </button>
+            <button onClick={() => handleInsight('characters')} className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-2xl flex flex-col items-center gap-2 border border-blue-100 dark:border-blue-900/50 active:scale-95 transition-transform">
+              <User size={24} className="text-blue-500" /><span className="text-[9px] font-black uppercase tracking-widest">Characters</span>
+            </button>
+            <button onClick={() => handleInsight('weaver')} className="p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl flex flex-col items-center gap-2 border border-purple-100 dark:border-purple-900/50 active:scale-95 transition-transform col-span-2">
+              <Wand2 size={24} className="text-purple-500" /><span className="text-[9px] font-black uppercase tracking-widest">Story Weaver</span>
+            </button>
+          </div>
+          {insightResult && (
+            <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-3xl border border-zinc-200 dark:border-zinc-700 animate-in fade-in slide-in-from-bottom-2 duration-500 shadow-sm">
+              <div className="text-sm leading-relaxed whitespace-pre-wrap font-serif text-zinc-800 dark:text-zinc-200">{insightResult}</div>
+              <button onClick={() => {
+                setChatHistory(prev => [...prev, {role:'bot', content: `**✨ Magic Insight (${insightType}):**\n${insightResult}`}]);
+                setActiveTab('chat');
+              }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 dark:border-amber-900 rounded-xl hover:bg-amber-50 transition-colors">Add to Chat</button>
+            </div>
+          )}
+          {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Consulting the Muse...</p></div>}
+        </div>
+      )}
 
+      {activeTab === 'chat' && (
+        <div className="flex flex-col h-full space-y-4">
+          {/* Messages area needs extra bottom padding to clear the fixed input below it */}
+          <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar pb-20">
+            {chatHistory.length === 0 && <div className="py-20 text-center opacity-30 px-6"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase tracking-widest">Ask Gemini about the story...</p></div>}
+            {chatHistory.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-tl-none border border-zinc-200 dark:border-zinc-700'}`}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* CHAT INPUT AREA */}
+          {/* On mobile, this stays fixed above the mobile navigation (bottom-[72px]) */}
+          <div className="fixed md:absolute bottom-[72px] md:bottom-0 left-0 right-0 p-4 bg-white dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 md:border-none z-10">
+            <div className="relative">
+              <input 
+                value={userInput} 
+                onChange={e=>setUserInput(e.target.value)} 
+                onKeyDown={e=>e.key==='Enter'&&handleChat()} 
+                placeholder="Ask Gemini..." 
+                className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" 
+              />
+              <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg hover:bg-amber-600 active:scale-90 transition-all">
+                <Send size={18}/>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'navigator' && (
+        <div className="grid grid-cols-4 gap-3">
+          {pages.map((_, i) => (
+            <button key={i} onClick={() => scrollToPage(i)} className={`aspect-square rounded-2xl border-2 flex items-center justify-center text-xs font-black transition-all ${currentPage === i ? 'bg-amber-500 text-white border-amber-500 shadow-xl scale-110' : 'border-zinc-100 dark:border-zinc-800 hover:border-amber-200'}`}>
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
+
+    </div>
+  </div>
+</aside>
+      </div>
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-around items-center z-[110] shadow-[0_-8px_30px_rgba(0,0,0,0.15)] px-2">
         <NavItem id="library" icon={Library} label="Library" />
         <NavItem id="insights" icon={Sparkles} label="Magic" />
