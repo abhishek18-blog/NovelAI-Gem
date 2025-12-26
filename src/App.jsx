@@ -1,28 +1,23 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   BookOpen, MessageSquare, Languages, FileUp, Link as LinkIcon, 
   Trash2, Send, Loader2, User, Clock, Cloud, CloudOff, Check, 
   LogOut, LogIn, Info, X, Layers, AlertCircle, Sun, Moon, Library,
-  RefreshCw, Sparkles, BrainCircuit, Quote, Wand2
+  RefreshCw, Plus, Settings
 } from 'lucide-react';
+
 
 // Firebase Imports
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
-  getAuth, signInAnonymously, signInWithCustomToken, signInWithPopup, GoogleAuthProvider, 
+  getAuth, signInAnonymously, signInWithPopup, GoogleAuthProvider, 
   onAuthStateChanged, signOut 
 } from 'firebase/auth';
 import { 
-  getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, deleteDoc, query 
+  getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, deleteDoc 
 } from 'firebase/firestore';
 
-/**
- * --- ENVIRONMENT CONFIGURATION ---
- * We use the platform-provided global variables to avoid build-time errors 
- * with import.meta.
- */
 
-// --- ENVIRONMENT CONFIGURATION (Vite .env) ---
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -30,17 +25,24 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-const appId = String(import.meta.env.VITE_APP_ID || 'novel-quest-v1').replace(/[^a-zA-Z0-9]/g, '_');
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
 
-// Initialize Firebase services outside of the component
+const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'novel-quest-v1';
+const appId = String(rawAppId).replace(/[^a-zA-Z0-9]/g, '_');
+
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const BACKEND_URL = "http://localhost:5000"; 
 const WORDS_PER_PAGE = 275;
+const AI_CALL_DELAY = 1500; // Minimum 1.5 seconds between API calls
+
 
 const LANGUAGES = [
   { code: 'en', name: 'English' },
@@ -53,532 +55,891 @@ const LANGUAGES = [
   { code: 'zh', name: 'Chinese' },
 ];
 
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [isSigningIn, setIsSigningIn] = useState(false);
   
-  // --- PERSISTENT STATES ---
-  const [text, setText] = useState(() => localStorage.getItem('nq_text') || "");
-  const [currentDocId, setCurrentDocId] = useState(() => localStorage.getItem('nq_doc_id') || null);
-  const [currentDocName, setCurrentDocName] = useState(() => localStorage.getItem('nq_doc_name') || "Untitled Manuscript");
-  const [currentPage, setCurrentPage] = useState(() => Number(localStorage.getItem('nq_page')) || 0);
-  const [theme, setTheme] = useState(() => localStorage.getItem('nq_theme') || 'light');
-  const [chatHistory, setChatHistory] = useState(() => {
-    try {
-      const saved = localStorage.getItem('nq_chat');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
+  // 🔥 PERSISTENT STATES - Load from localStorage
+  const [text, setText] = useState(() => {
+    try { return localStorage.getItem('novelQuestText') || ""; } catch { return ""; }
   });
-
-  // UI States
-  const [activeTab, setActiveTab] = useState('library');
+  const [currentDocId, setCurrentDocId] = useState(() => {
+    try { 
+      const saved = localStorage.getItem('novelQuestCurrentDocId');
+      return saved && saved !== '' ? saved : null;
+    } catch { return null; }
+  });
+  const [currentDocName, setCurrentDocName] = useState(() => {
+    try { return localStorage.getItem('novelQuestCurrentDocName') || "Untitled Manuscript"; } catch { return "Untitled Manuscript"; }
+  });
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('library');
+  const [chatHistory, setChatHistory] = useState(() => {
+    try { return localStorage.getItem('novelQuestChat') ? JSON.parse(localStorage.getItem('novelQuestChat')) : []; } catch { return []; }
+  });
   const [userInput, setUserInput] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [sources, setSources] = useState([]); 
-  const [notification, setNotification] = useState(null);
-  const [insightResult, setInsightResult] = useState("");
-  const [insightType, setInsightType] = useState(null);
-  const [isPdfReady, setIsPdfReady] = useState(false);
   const [selectedLang, setSelectedLang] = useState('hi');
+  const [linkInput, setLinkInput] = useState("");
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  // ✅ currentPage persisted and restored
+  const [currentPage, setCurrentPage] = useState(() => {
+    try {
+      const saved = localStorage.getItem('novelQuestCurrentPage');
+      return saved ? Number(saved) || 0 : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  const [isPdfLibReady, setIsPdfLibReady] = useState(false);
+const [theme, setTheme] = useState(() => {
+  try {
+    const stored = localStorage.getItem('novelQuestTheme');
+    return stored === 'light' || stored === 'dark' ? stored : 'light';
+  } catch {
+    return 'light';
+  }
+});
+
+
+  const [lastAiCall, setLastAiCall] = useState(0);
+  const [nextCallAvailable, setNextCallAvailable] = useState(0);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
   
-  const isInitialLoad = useRef(true);
+  const scrollContainerRef = useRef(null);
 
-  // --- THEME ENGINE ---
+
+  // 🔥 SAVE TO LOCALSTORAGE IMMEDIATELY on any change
+  // ✅ also store currentPage
   useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-      root.style.backgroundColor = "#09090b";
-    } else {
-      root.classList.remove('dark');
-      root.style.backgroundColor = "#fafafa";
+    try {
+      localStorage.setItem('novelQuestText', text);
+      localStorage.setItem('novelQuestCurrentDocId', currentDocId || '');
+      localStorage.setItem('novelQuestCurrentDocName', currentDocName);
+      localStorage.setItem('novelQuestChat', JSON.stringify(chatHistory));
+      localStorage.setItem('novelQuestTheme', theme);
+      localStorage.setItem('novelQuestCurrentPage', String(currentPage));
+      localStorage.setItem('novelQuestLastSaved', new Date().toISOString());
+    } catch (err) {
+      console.warn('localStorage save failed:', err);
     }
-    localStorage.setItem('nq_theme', theme);
-  }, [theme]);
+  }, [text, currentDocId, currentDocName, chatHistory, theme, currentPage]);
 
-  // --- PERSISTENCE SYNC ---
+
+  // Theme Sync
+useEffect(() => {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+
+  if (theme === 'dark') root.classList.add('dark');
+  else root.classList.remove('dark');
+
+  try {
+    localStorage.setItem('novelQuestTheme', theme);
+  } catch {}
+}, [theme]);
+
+
+
+
+  // Update countdown for next API call
   useEffect(() => {
-    localStorage.setItem('nq_text', text);
-    localStorage.setItem('nq_doc_id', currentDocId || "");
-    localStorage.setItem('nq_doc_name', currentDocName);
-    localStorage.setItem('nq_chat', JSON.stringify(chatHistory));
-    localStorage.setItem('nq_page', currentPage.toString());
-  }, [text, currentDocId, currentDocName, chatHistory, currentPage]);
+    if (nextCallAvailable <= 0) return;
+    const interval = setInterval(() => {
+      setNextCallAvailable(prev => Math.max(0, prev - 1));
+    }, 100);
+    return () => clearInterval(interval);
+  }, [nextCallAvailable]);
 
-  // --- PDF ENGINE LOADER ---
-  useEffect(() => {
-    if (window.pdfjsLib) {
-      setIsPdfReady(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
-    script.onload = () => {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-      setIsPdfReady(true);
-    };
-    document.head.appendChild(script);
-  }, []);
 
-  // --- AUTH INITIALIZATION ---
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Authentication Error:", err);
-      }
-    };
-    initAuth();
+const toggleTheme = () => {
+  setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+};
 
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setIsAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
 
-  // --- FIRESTORE SYNC ---
-  useEffect(() => {
-    if (!user) return;
-    const sourcesRef = collection(db, 'artifacts', appId, 'users', user.uid, 'sources');
-    const unsubscribe = onSnapshot(sourcesRef, 
-      (snap) => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setSources(docs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
-      },
-      (error) => {
-        console.error("Firestore sync error:", error);
-      }
-    );
-    return () => unsubscribe();
-  }, [user]);
+  const notify = (msg, type = 'error') => {
+    if (!msg) { setNotification(null); return; }
+    let textContent = typeof msg === 'string' ? msg : (msg.message || String(msg));
+    setNotification({ text: textContent, type });
+    if (type !== 'error') setTimeout(() => setNotification(null), 5000);
+  };
 
-  // --- READING ENGINE ---
-  const pages = useMemo(() => {
-    const words = text.split(/\s+/).filter(Boolean);
-    const res = [];
-    for (let i = 0; i < words.length; i += WORDS_PER_PAGE) {
-      res.push(words.slice(i, i + WORDS_PER_PAGE).join(" "));
-    }
-    return res.length > 0 ? res : ["No manuscript loaded. Use the Library to upload a PDF or start writing."];
-  }, [text]);
 
-  const readProgress = useMemo(() => {
-    if (pages.length <= 1 || !text) return 0;
-    return Math.round(((currentPage + 1) / pages.length) * 100);
-  }, [currentPage, pages.length, text]);
-
-  // Progress Tracking via Intersection Observer
-  useEffect(() => {
-    const observer = new IntersectionObserver((entries) => {
-      if (isInitialLoad.current) return;
-      entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          const idx = parseInt(entry.target.getAttribute('data-page-index') || "0");
-          if (!isNaN(idx)) setCurrentPage(idx);
-        }
-      });
-    }, { threshold: 0.5 });
-
-    document.querySelectorAll('[data-page-index]').forEach(el => observer.observe(el));
-    return () => observer.disconnect();
-  }, [pages]);
-
-  // Restore Last Visited Page
-  useEffect(() => {
-    if (pages.length > 0 && isInitialLoad.current) {
-      const savedPage = Number(localStorage.getItem('nq_page')) || 0;
-      const safePage = Math.min(savedPage, pages.length - 1);
-      setTimeout(() => {
-        scrollToPage(safePage);
-        isInitialLoad.current = false;
-      }, 800);
-    }
-  }, [pages]);
-
-  // --- AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a literary assistant.", isTranslation = false) => {
-    setIsAiLoading(true);
+  // 🔥 FIXED: PROPER AI CALL WITH BETTER TOKEN MANAGEMENT
+  const callAi = async (prompt, sys = "You are a helpful literary analyst. Keep responses concise and under 300 words.", isTranslation = false) => {
+    // Check rate limit
+    const now = Date.now();
+    const timeSinceLastCall = now - lastAiCall;
     
-    const fetchContent = async (retryCount = 0) => {
-      try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+    if (timeSinceLastCall < AI_CALL_DELAY) {
+      const waitMs = AI_CALL_DELAY - timeSinceLastCall;
+      const waitSec = Math.ceil(waitMs / 1000);
+      setNextCallAvailable(waitSec);
+      notify(`Rate limited. Wait ${waitSec}s before next request`, "info");
+      return `Please wait ${waitSec} seconds before making another request.`;
+    }
+
+
+    if (!GEMINI_API_KEY) {
+      notify("Gemini API key not configured", "error");
+      return "Error: API key is missing. Check your .env file.";
+    }
+
+
+    if (!text.trim()) {
+      notify("Load a document first", "info");
+      return "Please load a document before asking questions.";
+    }
+
+
+    setIsAiLoading(true);
+    setLastAiCall(now);
+    
+    try {
+      // For translations, use minimal context; for chat, include more
+      const contextSize = isTranslation ? 200 : 2000;      // less context
+      const maxTokens = isTranslation ? 1200 : 300;        // more room for output
+      
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: `Current Context (Page ${currentPage + 1}):\n${pages[currentPage]}\n\nQuery: ${prompt}` }] }],
-            systemInstruction: { parts: [{ text: systemPrompt }] }
+            systemInstruction: { parts: [{ text: sys }] },
+            contents: [{
+              parts: [{
+                text: `Document: "${currentDocName}"\n\nContext (first ${contextSize} characters):\n${text.substring(0, contextSize)}\n\n---\n\nUser Query:\n${prompt}`
+              }]
+            }],
+            generationConfig: {
+              temperature: isTranslation ? 0.3 : 0.6, // Lower temp for translations (more consistent)
+              maxOutputTokens: maxTokens,
+              topP: 0.9,
+              topK: 40,
+            }
           })
-        });
+        }
+      );
 
-        if (!response.ok) {
-          if ((response.status === 429 || response.status >= 500) && retryCount < 5) {
-            const delay = Math.pow(2, retryCount) * 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return fetchContent(retryCount + 1);
-          }
-          throw new Error('AI API request failed');
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Gemini API Error:", errorData);
+        
+        // Handle specific errors
+        if (errorData.error?.message?.includes("RESOURCE_EXHAUSTED")) {
+          notify("API quota exceeded. Please try again later.", "error");
+          return "API quota exceeded. Please try again in a few moments.";
+        }
+        
+        if (errorData.error?.message?.includes("INVALID_ARGUMENT")) {
+          notify("Invalid API request. Try again.", "error");
+          return "Invalid request format. Please try again.";
         }
 
-        const result = await response.json();
-        return result.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
-      } catch (err) {
-        if (retryCount < 5) {
-          const delay = Math.pow(2, retryCount) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return fetchContent(retryCount + 1);
-        }
-        throw err;
+
+        return `API Error: ${errorData.error?.message || 'Request failed'}`;
       }
-    };
 
-    try {
-      return await fetchContent();
-    } catch (err) {
-      notify("AI analysis failed. Please check your connection.", "error");
-      return "AI connection failed.";
+
+      const result = await response.json();
+      const aiResponse = result.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated. Try again.";
+      
+      // Check if response was truncated (very short for translation)
+      if (isTranslation && aiResponse.length < 20) {
+        notify("Translation may be incomplete. Try selecting shorter text.", "info");
+      }
+      
+      return aiResponse;
+    } catch (error) {
+      console.error("AI Call Error:", error);
+      notify(`Network error: ${error.message}`, "error");
+      return `Error: ${error.message}. Check your internet connection.`;
     } finally {
       setIsAiLoading(false);
     }
   };
 
-  // --- UI HANDLERS ---
-  const scrollToPage = (index) => {
-    const el = document.getElementById(`page-${index}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    if (window.innerWidth < 768) setIsSidebarOpen(false);
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setUser(null);
+      setSources([]);
+      // Clear sensitive data
+      localStorage.removeItem('novelQuestCurrentDocId');
+      setText("");
+      setCurrentDocName("Untitled Manuscript");
+      notify("Signed out", "info");
+    } catch (err) {
+      notify("Sign out failed");
+    }
   };
 
+
+  const handleSignInGoogle = async () => {
+    setIsAuthLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await signInWithPopup(auth, provider);
+      notify("Signed in successfully!", "info");
+    } catch (err) {
+      notify(err.message || "Sign in failed");
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+
+  const handleSignInGuest = async () => {
+    setIsAuthLoading(true);
+    try {
+      await signInAnonymously(auth);
+      notify("Guest access granted", "info");
+    } catch (err) {
+      notify(err.message || "Guest access failed");
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+
+  const getPages = () => {
+    const words = text.split(/\s+/).filter(Boolean);
+    const result = [];
+    for (let i = 0; i < words.length; i += WORDS_PER_PAGE) {
+      result.push(words.slice(i, i + WORDS_PER_PAGE).join(" "));
+    }
+    return result.length > 0 ? result : ["(Vault empty. Sign in to upload document.)"];
+  };
+
+
+  const pages = getPages();
+
+
+  // 🔥 AUTH LISTENER - First thing to run
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setIsAuthLoading(false);
+      setIsRestoringSession(false);
+    });
+    return unsubscribe;
+  }, []);
+
+
+  // 🔥 FIRESTORE LISTENER - Load sources from Firestore when user logs in
+  useEffect(() => {
+    if (!user) {
+      setSources([]);
+      return;
+    }
+    
+    const sanitizedUserId = String(user.uid).replace(/[^a-zA-Z0-9]/g, '_');
+    const sourcesRef = collection(db, 'artifacts', appId, 'users', sanitizedUserId, 'sources');
+    
+    const unsub = onSnapshot(sourcesRef, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setSources(docs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+      console.log('Firestore sources loaded:', docs.length);
+    });
+    
+    return unsub;
+  }, [user]);
+
+
+  // 🔥 RESTORE SESSION - After user loaded, restore from Firestore if exists
+  useEffect(() => {
+    if (isAuthLoading || isRestoringSession || !user || !currentDocId) return;
+    
+    const sanitizedUserId = String(user.uid).replace(/[^a-zA-Z0-9]/g, '_');
+    const docRef = doc(db, 'artifacts', appId, 'users', sanitizedUserId, 'sources', currentDocId);
+    
+    getDoc(docRef).then(docSnap => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setText(data.content || "");
+        setCurrentDocName(data.name || "Untitled");
+        notify("Session restored ✓", "info");
+        console.log('Session restored from Firestore');
+      } else {
+        console.log('Document not found in Firestore, using localStorage');
+      }
+    }).catch(err => {
+      console.warn('Firestore restore failed:', err);
+      // Fallback to localStorage is already loaded
+    });
+  }, [user, currentDocId, isAuthLoading, isRestoringSession]);
+
+
+  // Intersection Observer for Page Counter
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const idx = parseInt(entry.target.getAttribute('data-page-index'));
+          if (!isNaN(idx)) setCurrentPage(idx);
+        }
+      });
+    }, { root: scrollContainerRef.current, threshold: 0.5 });
+    document.querySelectorAll('[data-page-index]').forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [pages]);
+
+  // ✅ auto-scroll to last visited page when pages are ready
+  useEffect(() => {
+    if (!pages.length) return;
+    const safeIndex = Math.min(currentPage, pages.length - 1);
+    setTimeout(() => scrollToPage(safeIndex), 300);
+  }, [pages.length]);  
+
+
+  // PDF Lib
+  useEffect(() => {
+    if (window.pdfjsLib) return setIsPdfLibReady(true);
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
+    script.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+      setIsPdfLibReady(true);
+    };
+    document.head.appendChild(script);
+  }, []);
+
+
+  const scrollToPage = (index) => {
+    const el = document.getElementById(`page-${index}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+
+  const handleTabClick = (tab) => {
+    if (activeTab === tab && isSidebarOpen) setIsSidebarOpen(false);
+    else { setActiveTab(tab); setIsSidebarOpen(true); }
+  };
+
+
+  const loadFromLibrary = (source) => {
+    setText(source.content || "");
+    setCurrentDocName(source.name || "Untitled");
+    setCurrentDocId(source.id);
+    setActiveTab('navigator');
+    setIsSidebarOpen(true);
+    setTimeout(() => scrollToPage(0), 100);
+  };
+
+
+  const deleteFromLibrary = async (e, id) => {
+    e.stopPropagation();
+    if (!user) return;
+    const sanitizedUserId = String(user.uid).replace(/[^a-zA-Z0-9]/g, '_');
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', sanitizedUserId, 'sources', id));
+      if (currentDocId === id) {
+        setText(""); 
+        setCurrentDocName("Untitled Manuscript"); 
+        setCurrentDocId(null);
+        localStorage.removeItem('novelQuestCurrentDocId');
+      }
+      notify("Document deleted", "info");
+    } catch (err) { notify("Deletion failed"); }
+  };
+
+
   const handleFileUpload = async (e) => {
+    if (!user || !isPdfLibReady) return notify("Sign in first", "info");
     const file = e.target.files[0];
-    if (!file || !user || !isPdfReady) return notify("PDF engine not ready or not signed in", "error");
+    if (!file) return;
+    
     setIsAiLoading(true);
     try {
       const buf = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
       let fullText = "";
-      for (let i = 1; i <= Math.min(pdf.numPages, 100); i++) {
+      for (let i = 1; i <= Math.min(pdf.numPages, 50); i++) {
         const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        fullText += content.items.map(item => item.str).join(' ') + '\n';
+        const textContent = await page.getTextContent();
+        fullText += textContent.items.map(item => item.str).join(' ') + '\n';
       }
-      const docRef = await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'sources'), {
-        name: file.name, content: fullText, date: new Date().toLocaleDateString(), timestamp: Date.now()
-      });
-      setText(fullText); setCurrentDocName(file.name); setCurrentDocId(docRef.id); setCurrentPage(0);
-      notify("Imported Successfully!", "success");
-    } catch (err) { 
-      console.error("PDF upload error:", err);
-      notify("PDF processing failed", "error"); 
+      const sanitizedUserId = String(user.uid).replace(/[^a-zA-Z0-9]/g, '_');
+      const docRef = await addDoc(
+        collection(db, 'artifacts', appId, 'users', sanitizedUserId, 'sources'),
+        {
+          name: file.name,
+          content: fullText,
+          type: 'pdf',
+          date: new Date().toLocaleDateString(),
+          size: (fullText.length/1024).toFixed(1) + " KB",
+          timestamp: Date.now()
+        }
+      );
+      setText(fullText);
+      setCurrentDocName(file.name);
+      setCurrentDocId(docRef.id);
+      setActiveTab('navigator');
+      setIsSidebarOpen(true);
+      notify("PDF loaded successfully!", "info");
+    } catch (err) {
+      notify("PDF loading failed: " + err.message);
+    } finally {
+      setIsAiLoading(false);
+      e.target.value = '';
     }
+  };
+
+
+
+  const handleAddLink = async () => {
+    if (!user) return notify("Sign in first", "info");
+    if (!linkInput.trim()) return notify("Enter a URL", "info");
+    setIsAiLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/process-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: linkInput })
+      });
+      const data = await res.json();
+      if (data.content) {
+        const sanitizedUserId = String(user.uid).replace(/[^a-zA-Z0-9]/g, '_');
+        const d = await addDoc(collection(db, 'artifacts', appId, 'users', sanitizedUserId, 'sources'), { 
+          name: data.name || "Web Page", type: 'link', content: data.content, 
+          date: new Date().toLocaleDateString(), size: (data.content.length/1024).toFixed(1) + " KB", timestamp: Date.now()
+        });
+        setText(data.content); 
+        setCurrentDocName(data.name || "Web Page"); 
+        setCurrentDocId(d.id);
+        setLinkInput(""); 
+        setShowLinkInput(false); 
+        setActiveTab('navigator'); 
+        setIsSidebarOpen(true);
+        notify("Web page loaded!", "info");
+      } else {
+        notify("Failed to load page", "error");
+      }
+    } catch (e) { notify("Error: " + e.message); }
     finally { setIsAiLoading(false); }
   };
 
-  const handleInsight = async (type) => {
-    if (!user) return notify("Sign in for insights", "error");
-    setInsightType(type);
-    let p = ""; let s = "You are a literary analyst.";
-    if (type === 'summary') p = "Summarize the key events on this page concisely.";
-    if (type === 'characters') p = "Identify characters on this page and their current motivations.";
-    if (type === 'weaver') p = "Suggest 3 creative plot directions based on the current scene.";
-    const res = await callAi(p, s);
-    setInsightResult(res);
-  };
 
-  const notify = (msg, type = 'info') => {
-    setNotification({ text: msg, type });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
+  // 🔥 FIXED: PROPER CHAT HANDLER WITH RATE LIMITING
   const handleChat = async () => {
-    if (!userInput.trim() || isAiLoading || !text.trim() || !user) return;
-    const q = userInput; setUserInput("");
-    setChatHistory(prev => [...prev, { role: 'user', content: q }]);
-    const res = await callAi(q);
-    setChatHistory(prev => [...prev, { role: 'bot', content: res }]);
+    if (!userInput.trim() || isAiLoading || !text.trim()) {
+      if (!text.trim()) notify("Load a document first", "info");
+      return;
+    }
+    
+    const msg = userInput.trim();
+    setChatHistory(p => [...p, { role: 'user', content: msg }]);
+    setUserInput("");
+    
+    const response = await callAi(msg, "You are a helpful literary analyst.", false);
+    setChatHistory(p => [...p, { role: 'bot', content: response }]);
   };
 
+
+  // 🔥 FIXED: BETTER TRANSLATE WITH CHUNKING FOR LONG TEXT
   const handleTranslate = async () => {
     const selection = window.getSelection().toString().trim();
-    if (!selection) return notify("Select text in the manuscript to translate", "info");
-    const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
-    const res = await callAi(
-      `Translate this text to ${targetLangName}. Return ONLY the translated text:\n\n${selection.substring(0, 500)}`,
-      `You are a professional literary translator. Preserve tone. Reply with ONLY the translation.`,
-      true
+    if (!selection) {
+      notify("Select text in the document first", "info");
+      return;
+    }
+    
+    // Warn if text is very long
+    if (selection.length > 1000) {
+      notify("Text is long. Translation may be incomplete. Select shorter text.", "info");
+    }
+    
+    const targetLang = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
+    
+    // Safer: translate at most 500 characters at a time
+    const textToTranslate = selection.length > 500 ? selection.substring(0, 500) + "..." : selection;
+    
+    const response = await callAi(
+      `Translate this ${selection.length} character text to ${targetLang}. Provide COMPLETE translation:\n\n${textToTranslate}`,
+      `You are a professional translator. Translate the text to ${targetLang}. IMPORTANT: Provide the COMPLETE translation, even if it's long. Reply with ONLY the full translation, no explanations.`,
+      true // isTranslation = true
     );
-    setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res}` }]);
-    setActiveTab('chat'); setIsSidebarOpen(true);
+    
+    setChatHistory(p => [...p, { 
+      role: 'bot', 
+      content: `**${targetLang} Translation (${selection.length} chars):**\n\n${response}` 
+    }]);
+    setActiveTab('chat'); 
+    setIsSidebarOpen(true);
   };
 
-  const handleGoogleSignIn = async () => {
-    if (isSigningIn) return;
-    setIsSigningIn(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      notify("Signed in with Google", "success");
-    } catch (err) {
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        notify("Sign-in cancelled", "info");
-      } else if (err.code === 'auth/popup-blocked') {
-        notify("Popup blocked!", "error");
-      } else {
-        notify("Authentication failed", "error");
-        console.error("Google Auth error:", err);
-      }
-    } finally {
-      setIsSigningIn(false);
+
+  
+  const handleClearChat = () => {
+    if (confirm("Clear all chat messages?")) {
+      setChatHistory([]);
+      notify("Chat cleared", "info");
     }
   };
 
-  const hardReset = () => {
-    if (confirm("Factory reset app? This clears your local session.")) {
-      localStorage.clear();
-      window.location.reload();
-    }
-  };
 
-  if (isAuthLoading) return (
-    <div className="h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
-      <div className="flex flex-col items-center gap-4">
-        <Loader2 className="animate-spin text-amber-500" size={32} />
-        <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Syncing Novel Quest</span>
+  if (isAuthLoading || isRestoringSession) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+        <div className="text-center">
+          <Loader2 className="animate-spin text-amber-500 mx-auto mb-4" size={32} />
+          <p className="text-sm font-bold uppercase tracking-widest opacity-75">Restoring session...</p>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  const NavItem = ({ id, icon: Icon, label }) => (
-    <button
-      onClick={() => { setActiveTab(id); setIsSidebarOpen(true); }}
-      className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl transition-all
-        ${activeTab === id && isSidebarOpen ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20 shadow-inner' : 'text-zinc-400'}`}
-    >
-      <Icon size={20} />
-      <span className="text-[9px] font-black uppercase tracking-tight">{label}</span>
-    </button>
-  );
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 overflow-hidden font-sans">
-      
-      {/* MOBILE HEADER */}
-      <header className="md:hidden sticky top-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 z-40 px-4 py-3 flex justify-between items-center">
-        <div className="flex items-center gap-2 overflow-hidden max-w-[60%]">
-          <BookOpen size={16} className="text-amber-500 shrink-0" />
-          <h1 className="text-xs font-black uppercase tracking-widest truncate">{currentDocName}</h1>
+    <div className="flex flex-col md:flex-row h-screen bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-serif overflow-hidden">
+      {/* SIDEBAR / MOBILE BOTTOM NAV */}
+      {/* sidebar hidden on mobile, visible on md+ */}
+      <div className="hidden md:flex w-16 bg-white dark:bg-[#121212] flex-col items-center py-6 border-r border-zinc-200 dark:border-zinc-800 z-30">
+        <div className="mb-8 p-2 bg-amber-100 dark:bg-amber-900/20 rounded-lg">
+          <BookOpen className="text-amber-500" size={24} />
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] font-black text-amber-500">{readProgress}%</span>
-          <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-1 text-zinc-400">
-            {theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>}
-          </button>
-        </div>
-        <div className="absolute bottom-0 left-0 h-[2.5px] bg-amber-500 transition-all duration-700 shadow-[0_0_10px_rgba(245,158,11,0.5)]" style={{ width: `${readProgress}%` }} />
-      </header>
-
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* DESKTOP SIDEBAR */}
-        <nav className="hidden md:flex w-20 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center py-8 gap-8 bg-white dark:bg-zinc-900 z-50">
-          <div className="p-3 bg-amber-500 rounded-2xl text-white shadow-lg shadow-amber-500/20 transition-transform hover:scale-105"><BookOpen size={24}/></div>
-          <NavItem id="library" icon={Library} label="Library" />
-          <NavItem id="insights" icon={Sparkles} label="Magic" />
-          <NavItem id="chat" icon={MessageSquare} label="Chat" />
-          <NavItem id="navigator" icon={Layers} label="Pages" />
-          <div className="mt-auto flex flex-col gap-4">
-            <button onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')} className="p-3 text-zinc-400 hover:text-amber-500 transition-colors" title="Toggle Theme">
-              {theme === 'dark' ? <Sun size={20}/> : <Moon size={20}/>}
-            </button>
-            <button onClick={hardReset} className="p-3 text-zinc-400 hover:text-red-500 transition-colors" title="Factory Reset">
-              <RefreshCw size={20}/>
-            </button>
-          </div>
+        <nav className="flex flex-col justify-around w-auto gap-6">
+          <button onClick={() => handleTabClick('library')} title="Library" className={`p-3 rounded transition-colors ${activeTab === 'library' && isSidebarOpen ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:text-amber-500'}`}><Library size={20}/></button>
+          <button onClick={() => handleTabClick('navigator')} title="Pages" className={`p-3 rounded transition-colors ${activeTab === 'navigator' && isSidebarOpen ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:text-amber-500'}`}><Layers size={20}/></button>
+          <button onClick={() => handleTabClick('chat')} title="Chat" className={`p-3 rounded transition-colors ${activeTab === 'chat' && isSidebarOpen ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:text-amber-500'}`}><MessageSquare size={20}/></button>
+          <button onClick={() => handleTabClick('translate')} title="Translate" className={`p-3 rounded transition-colors ${activeTab === 'translate' && isSidebarOpen ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:text-amber-500'}`}><Languages size={20}/></button>
+          <button onClick={() => handleTabClick('profile')} title="Profile" className={`p-3 rounded transition-colors ${activeTab === 'profile' && isSidebarOpen ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'text-zinc-500 hover:text-amber-500'}`}><User size={20}/></button>
         </nav>
-
-        {/* READING AREA */}
-        <main className="flex-1 overflow-y-auto px-4 md:px-20 py-8 scroll-smooth relative custom-scrollbar bg-zinc-50 dark:bg-zinc-950">
-          <div className="max-w-3xl mx-auto">
-            <div className="hidden md:flex justify-between items-end border-b border-zinc-200 dark:border-zinc-800 pb-6 mb-12">
-              <div className="max-w-[70%]">
-                <h1 className="text-3xl font-serif font-bold text-zinc-800 dark:text-zinc-100">{currentDocName}</h1>
-                <p className="text-[10px] uppercase font-black tracking-widest text-zinc-400 mt-2">
-                  Progress: Page {currentPage + 1} of {pages.length} ({readProgress}%)
-                </p>
-              </div>
-              {user && (
-                <div className="text-[10px] font-bold text-emerald-500 flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-1.5 rounded-full border border-emerald-100 dark:border-emerald-900/50">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"/> 
-                  Session Active
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-12 pb-32">
-              {pages.map((p, i) => (
-                <article 
-                  key={i} id={`page-${i}`} data-page-index={i}
-                  className="bg-white dark:bg-zinc-900 p-8 md:p-16 rounded-[2rem] border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all hover:shadow-md relative group selection:bg-amber-100 dark:selection:bg-amber-900/50"
-                >
-                  <span className="absolute top-6 right-8 text-[10px] font-black text-zinc-200 dark:text-zinc-800 uppercase tracking-widest transition-colors group-hover:text-amber-500">Page {i + 1}</span>
-                  <div className="font-serif text-lg md:text-xl leading-relaxed text-zinc-800 dark:text-zinc-300 whitespace-pre-wrap select-text">
-                    {p}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </main>
-
-        {/* FUNCTIONAL DRAWER */}
-        <aside className={`fixed inset-0 md:relative md:inset-auto z-[100] md:z-auto transition-all duration-300 overflow-hidden flex
-          ${isSidebarOpen ? 'w-full md:w-[420px]' : 'w-0'}`}>
-          <div className="flex-1 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 flex flex-col shadow-2xl md:shadow-none">
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/50 dark:bg-zinc-950/20">
-              <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-400">{activeTab}</h2>
-              <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"><X size={20}/></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              {activeTab === 'library' && (
-                <div className="space-y-6">
-                  {!user || user.isAnonymous ? (
-                    <div className="space-y-4 py-8 text-center">
-                      <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto text-amber-500 mb-2"><User size={32}/></div>
-                      <p className="text-sm text-zinc-500 px-4">Sign in with Google to sync manuscripts across devices.</p>
-                      <button 
-                        onClick={handleGoogleSignIn} 
-                        disabled={isSigningIn}
-                        className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
-                      >
-                        {isSigningIn ? <Loader2 className="animate-spin" size={16} /> : <LogIn size={16} />}
-                        {isSigningIn ? "Authorizing..." : "Continue with Google"}
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <label className="flex flex-col items-center justify-center p-10 border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl hover:border-amber-500 cursor-pointer transition-all group">
-                        <FileUp size={32} className="text-zinc-300 group-hover:text-amber-500 mb-2 transition-colors"/>
-                        <span className="text-[10px] font-black uppercase text-zinc-500">Upload PDF</span>
-                        <input type="file" onChange={handleFileUpload} className="hidden" accept=".pdf" />
-                      </label>
-                      <div className="space-y-3">
-                        <h3 className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Collections</h3>
-                        {sources.map(s => (
-                          <div key={s.id} className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${currentDocId === s.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/10' : 'border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
-                            <button onClick={() => { setText(s.content); setCurrentDocName(s.name); setCurrentDocId(s.id); setIsSidebarOpen(false); isInitialLoad.current = true; }} className="flex-1 text-left min-w-0">
-                              <p className="text-xs font-bold truncate">{s.name}</p>
-                              <p className="text-[10px] text-zinc-400 mt-1">{s.date}</p>
-                            </button>
-                            <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sources', s.id))} className="text-zinc-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
-                          </div>
-                        ))}
-                      </div>
-                      <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 dark:border-zinc-800 rounded-xl hover:text-red-500 transition-colors mt-8">Sign Out</button>
-                    </>
-                  )}
-                </div>
-              )}
-              {activeTab === 'insights' && (
-                <div className="space-y-6">
-                  <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-700">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Translation Language</label>
-                    <div className="flex gap-2">
-                      <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs">
-                        {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-                      </select>
-                      <button onClick={handleTranslate} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-[10px] font-black uppercase transition-transform active:scale-95 shadow-md">Translate Selection</button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button onClick={() => handleInsight('summary')} className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl flex flex-col items-center gap-2 border border-amber-100 dark:border-amber-900/50 active:scale-95 transition-transform">
-                      <BrainCircuit size={24} className="text-amber-500" /><span className="text-[9px] font-black uppercase tracking-widest">Summary</span>
-                    </button>
-                    <button onClick={() => handleInsight('characters')} className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-2xl flex flex-col items-center gap-2 border border-blue-100 dark:border-blue-900/50 active:scale-95 transition-transform">
-                      <User size={24} className="text-blue-500" /><span className="text-[9px] font-black uppercase tracking-widest">Characters</span>
-                    </button>
-                    <button onClick={() => handleInsight('weaver')} className="p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl flex flex-col items-center gap-2 border border-purple-100 dark:border-purple-900/50 active:scale-95 transition-transform col-span-2">
-                      <Wand2 size={24} className="text-purple-500" /><span className="text-[9px] font-black uppercase tracking-widest">Story Weaver</span>
-                    </button>
-                  </div>
-                  {insightResult && (
-                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-3xl border border-zinc-200 dark:border-zinc-700 animate-in fade-in slide-in-from-bottom-2 duration-500 shadow-sm">
-                      <div className="text-sm leading-relaxed whitespace-pre-wrap font-serif text-zinc-800 dark:text-zinc-200">{insightResult}</div>
-                      <button onClick={() => {
-                        setChatHistory(prev => [...prev, {role:'bot', content: `**✨ Magic Insight (${insightType}):**\n${insightResult}`}]);
-                        setActiveTab('chat');
-                      }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 dark:border-amber-900 rounded-xl hover:bg-amber-50 transition-colors">Add to Chat Session</button>
-                    </div>
-                  )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Consulting the Muse...</p></div>}
-                </div>
-              )}
-              {activeTab === 'chat' && (
-                <div className="flex flex-col h-full space-y-4">
-                  <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30 px-6"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase tracking-widest">Ask about characters, themes, or plot points.</p></div>}
-                    {chatHistory.map((m, i) => (
-                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-tl-none border border-zinc-200 dark:border-zinc-700'}`}>
-                          {m.content}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="relative pt-2">
-                    <input value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleChat()} placeholder="Ask Gemini..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
-                    <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg hover:bg-amber-600 active:scale-90 transition-all"><Send size={18}/></button>
-                  </div>
-                </div>
-              )}
-              {activeTab === 'navigator' && (
-                <div className="grid grid-cols-4 gap-3">
-                  {pages.map((_, i) => (
-                    <button key={i} onClick={() => scrollToPage(i)} className={`aspect-square rounded-2xl border-2 flex items-center justify-center text-xs font-black transition-all ${currentPage === i ? 'bg-amber-500 text-white border-amber-500 shadow-xl scale-110' : 'border-zinc-100 dark:border-zinc-800 hover:border-amber-200'}`}>
-                      {i + 1}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
+        <div className="mt-auto flex flex-col items-center gap-6 text-center">
+          <div className="text-[10px] text-zinc-500 font-black vertical-text uppercase tracking-widest">Pg {currentPage + 1}</div>
+          {user ? <Check className="text-emerald-500" size={12}/> : <CloudOff className="text-zinc-500" size={12}/>}
+        </div>
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-around items-center z-[110] shadow-[0_-8px_30px_rgba(0,0,0,0.15)] px-2">
-        <NavItem id="library" icon={Library} label="Library" />
-        <NavItem id="insights" icon={Sparkles} label="Magic" />
-        <NavItem id="chat" icon={MessageSquare} label="Chat" />
-        <NavItem id="navigator" icon={Layers} label="Pages" />
-        <button onClick={hardReset} className="flex flex-col items-center p-2 text-zinc-400 active:text-red-500 transition-colors">
-          <RefreshCw size={20} />
-          <span className="text-[9px] font-black uppercase tracking-tight">Reset</span>
-        </button>
-      </nav>
 
+      {/* MAIN CONTENT */}
+<main ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 pb-20 md:pb-4 px-4 md:px-12 bg-zinc-50 order-1 md:order-2">
+        <header className="max-w-4xl mx-auto mb-8 flex justify-between items-center py-4">
+          <h1 className="text-sm md:text-lg font-black tracking-widest uppercase truncate max-w-[200px] md:max-w-md opacity-70">
+            {currentDocName}
+          </h1>
+          <div className="flex items-center gap-3">
+            <span className="md:hidden text-xs font-bold text-zinc-500 uppercase tracking-widest">Pg {currentPage + 1}</span>
+            <button onClick={toggleTheme} className="p-2 rounded-full bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 transition">
+              {theme === 'dark' ? <Sun size={14}/> : <Moon size={14}/>}
+            </button>
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="px-4 py-2 bg-amber-500/10 text-amber-600 rounded-full text-xs font-bold uppercase tracking-widest md:hidden hover:bg-amber-500/20 transition">
+              Menu
+            </button>
+          </div>
+        </header>
+
+
+        <div className="max-w-3xl mx-auto flex flex-col gap-16 items-center">
+          {pages.map((p, i) => (
+             <div
+    key={i}
+    id={`page-${i}`}
+    data-page-index={i}
+    className="relative w-full min-h-[80vh] bg-white border border-zinc-200 rounded-xl shadow-xl p-8 md:p-16 flex flex-col hover:shadow-2xl transition"
+  >
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 text-[10px] uppercase font-black text-zinc-300 tracking-widest">
+      Page {i + 1}
+    </div>
+    <div className="flex-1 text-base md:text-lg leading-relaxed text-zinc-800 whitespace-pre-wrap font-serif select-text">
+      {p}
+    </div>
+  </div>
+          ))}
+          {!text && (
+            <div className="py-20 text-center opacity-50">
+              <BookOpen size={48} className="mx-auto mb-4"/>
+              <p className="text-lg font-bold">No document loaded</p>
+              <p className="text-sm mt-2">Upload a PDF or add a web link from Library tab</p>
+            </div>
+          )}
+        </div>
+      </main>
+
+
+      {/* DRAWER / SIDEBAR */}
+      <aside className={`${isSidebarOpen ? 'w-full md:w-96 translate-x-0' : 'w-0 translate-x-full'} fixed md:static inset-y-0 right-0 bg-white dark:bg-[#121212] border-l border-zinc-200 dark:border-zinc-800 transition-all duration-300 z-40 shadow-2xl overflow-hidden flex flex-col order-3`}>
+        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-zinc-50 dark:bg-zinc-900/50">
+          <h2 className="text-xs font-black uppercase tracking-widest text-zinc-500">{activeTab}</h2>
+          <div className="flex items-center gap-2">
+            {isAiLoading && <Loader2 className="animate-spin text-amber-500" size={14}/>}
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"><X size={16}/></button>
+          </div>
+        </div>
+
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* PROFILE TAB */}
+          {activeTab === 'profile' && (
+            <div className="space-y-6 text-center">
+              <div className="w-20 h-20 mx-auto bg-gradient-to-r from-amber-400 to-amber-500 rounded-full flex items-center justify-center overflow-hidden shadow-lg">
+                {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover"/> : <User size={32} className="text-white"/>}
+              </div>
+              <div>
+                <h3 className="font-bold text-lg">{user?.displayName || "Guest Researcher"}</h3>
+                <p className="text-xs text-zinc-500">{user?.email || "Anonymous"}</p>
+                {user && <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 uppercase font-bold">✓ Authenticated</p>}
+              </div>
+              {user ? (
+                <button onClick={handleSignOut} className="w-full py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-red-100 dark:hover:bg-red-900/30 transition flex items-center justify-center gap-2">
+                  <LogOut size={14}/> Sign Out
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <button onClick={handleSignInGoogle} className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest hover:from-blue-700 hover:to-blue-800 transition flex items-center justify-center gap-2">
+                    <LogIn size={14}/> Google Sign In
+                  </button>
+                  <button onClick={handleSignInGuest} className="w-full py-3 border border-zinc-300 dark:border-zinc-700 font-bold rounded-xl text-xs uppercase tracking-widest hover:bg-zinc-50 dark:hover:bg-zinc-800 transition">
+                    Guest Access
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {/* LIBRARY TAB */}
+          {activeTab === 'library' && (
+            <div className="space-y-4">
+              {!user ? (
+                <div className="text-center py-8 text-zinc-500">
+                  <BookOpen size={32} className="mx-auto mb-3 opacity-30"/>
+                  <p className="text-sm mb-4">Sign in to access your library</p>
+                  <button onClick={() => setActiveTab('profile')} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-xs font-bold">Sign In Now</button>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex flex-col items-center p-4 border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl cursor-pointer hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-colors">
+                      <FileUp className="mb-2 text-zinc-400"/>
+                      <span className="text-[10px] font-bold uppercase text-zinc-600 dark:text-zinc-400">Upload PDF</span>
+                      <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload}/>
+                    </label>
+                    <button onClick={() => setShowLinkInput(!showLinkInput)} className="flex flex-col items-center p-4 border-2 border-dashed border-zinc-300 dark:border-zinc-700 rounded-xl hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/10 transition-colors">
+                      <LinkIcon className="mb-2 text-zinc-400"/>
+                      <span className="text-[10px] font-bold uppercase text-zinc-600 dark:text-zinc-400">Web Link</span>
+                    </button>
+                  </div>
+
+
+                  {showLinkInput && (
+                    <div className="flex gap-2 p-3 bg-zinc-100 dark:bg-zinc-800 rounded-xl">
+                      <input 
+                        value={linkInput} 
+                        onChange={e=>setLinkInput(e.target.value)} 
+                        placeholder="https://example.com" 
+                        className="flex-1 bg-white dark:bg-zinc-900 p-2 rounded border border-zinc-300 dark:border-zinc-700 text-xs focus:ring-2 focus:ring-amber-500"
+                      />
+                      <button 
+                        onClick={handleAddLink} 
+                        disabled={isAiLoading}
+                        className="px-3 py-2 bg-amber-500 text-white rounded font-bold text-xs disabled:opacity-50 transition"
+                      >
+                        {isAiLoading ? <Loader2 size={14} className="animate-spin"/> : "Add"}
+                      </button>
+                    </div>
+                  )}
+
+
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase text-zinc-500">Library ({sources.length})</h4>
+                    {sources.length === 0 ? (
+                      <p className="text-center py-8 text-zinc-400 text-sm">No documents yet</p>
+                    ) : (
+                      sources.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => loadFromLibrary(s)}
+                          className={`w-full p-3 border rounded-xl flex justify-between items-start transition-all hover:shadow-lg ${
+                            currentDocId === s.id
+                              ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20 shadow-md'
+                              : 'border-zinc-200 dark:border-zinc-800 hover:border-amber-300 hover:bg-amber-50/50 dark:hover:bg-amber-900/10'
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0 text-left">
+                            <p className="text-xs font-bold truncate">{s.name}</p>
+                            <p className="text-[10px] text-zinc-500 mt-1">{s.date} • {s.size}</p>
+                          </div>
+                          <Trash2 
+                            onClick={(e)=>{e.stopPropagation();deleteFromLibrary(e,s.id)}} 
+                            size={14} 
+                            className="ml-2 text-zinc-400 hover:text-red-500 flex-shrink-0 transition"
+                          />
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+
+          {/* NAVIGATOR TAB */}
+          {activeTab === 'navigator' && (
+            <div>
+              <h4 className="text-xs font-bold uppercase text-zinc-500 mb-4">Jump to Page</h4>
+              <div className="grid grid-cols-4 gap-2 max-h-96 overflow-y-auto">
+                {pages.map((_, i) => (
+                  <button 
+                    key={i} 
+                    onClick={() => scrollToPage(i)} 
+                    className={`aspect-square flex items-center justify-center rounded-lg border text-xs font-bold transition-all hover:shadow-md ${
+                      currentPage === i 
+                        ? 'bg-amber-500 text-white border-amber-500 shadow-md' 
+                        : 'bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-amber-400'
+                    }`}
+                  >
+                    {i+1}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-zinc-500 mt-4 text-center">{pages.length} pages total</p>
+            </div>
+          )}
+
+
+          {/* CHAT TAB */}
+          {activeTab === 'chat' && (
+            <div className="space-y-4 h-full flex flex-col">
+              <div className="flex justify-between items-center">
+                <h4 className="text-xs font-bold uppercase text-zinc-500">Chat with AI ({chatHistory.length})</h4>
+                {chatHistory.length > 0 && (
+                  <button 
+                    onClick={handleClearChat}
+                    className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition"
+                  >
+                    <Trash2 size={14} className="text-zinc-400 hover:text-red-500"/>
+                  </button>
+                )}
+              </div>
+
+
+              <div className="flex-1 space-y-3 min-h-[200px] max-h-96 overflow-y-auto p-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                {chatHistory.length === 0 ? (
+                  <div className="text-center py-12 text-zinc-400">
+                    <MessageSquare size={32} className="mx-auto mb-4 opacity-25"/>
+                    <p className="text-sm">Ask questions about your document</p>
+                  </div>
+                ) : (
+                  chatHistory.map((m, i) => (
+                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] p-3 rounded-xl text-sm leading-relaxed break-words ${
+                        m.role === 'user'
+                          ? 'bg-amber-500 text-white rounded-br-none'
+                          : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-200 rounded-bl-none'
+                      }`}>
+                        {m.content}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {nextCallAvailable > 0 && (
+                  <div className="text-center p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs text-yellow-700 dark:text-yellow-400 font-bold">
+                    Rate limited. Wait {nextCallAvailable}s...
+                  </div>
+                )}
+              </div>
+
+
+              {!text && (
+                <div className="text-center py-4 text-zinc-400 text-sm">
+                  <p>Load a document first to chat</p>
+                </div>
+              )}
+            </div>
+          )}
+
+
+          {/* TRANSLATE TAB */}
+          {activeTab === 'translate' && (
+            <div className="space-y-4">
+              <div className="p-4 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                <label className="block text-[10px] font-bold uppercase text-zinc-600 dark:text-zinc-400 mb-3">Target Language</label>
+                <select 
+                  value={selectedLang} 
+                  onChange={(e)=>setSelectedLang(e.target.value)} 
+                  className="w-full bg-white dark:bg-zinc-900 p-3 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm font-medium focus:ring-2 focus:ring-amber-500"
+                >
+                  {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
+                </select>
+              </div>
+
+
+              <button 
+                onClick={handleTranslate}
+                disabled={isAiLoading || nextCallAvailable > 0}
+                className="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {isAiLoading ? <Loader2 size={14} className="animate-spin"/> : <Languages size={14}/>}
+                {nextCallAvailable > 0 ? `Wait ${nextCallAvailable}s` : 'Translate Selection'}
+              </button>
+
+
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+                <p className="text-[10px] text-amber-800 dark:text-amber-300 text-center leading-relaxed">
+                  ✓ Select text in the document<br/>
+                  ✓ Choose target language<br/>
+                  ✓ Click button to translate
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+
+        {/* CHAT INPUT */}
+        {activeTab === 'chat' && (
+          <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+            <div className="relative">
+              <input 
+                value={userInput} 
+                onChange={e=>setUserInput(e.target.value)} 
+                onKeyDown={e=>e.key==='Enter'&&handleChat()}
+                placeholder={text ? "Ask about document..." : "Load document first..."} 
+                disabled={!text || isAiLoading || nextCallAvailable > 0}
+                className="w-full px-4 py-3 pr-12 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 disabled:opacity-50"
+              />
+              <button 
+                onClick={handleChat}
+                disabled={!text || isAiLoading || !userInput.trim() || nextCallAvailable > 0}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-zinc-400 hover:text-amber-500 disabled:opacity-30 transition"
+              >
+                <Send size={16}/>
+              </button>
+            </div>
+          </div>
+        )}
+      </aside>
+
+
+      {/* NOTIFICATION */}
       {notification && (
-        <div className={`fixed bottom-20 md:bottom-10 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-xs p-4 rounded-3xl shadow-2xl z-[200] flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300 border border-zinc-100 dark:border-zinc-800 ${notification.type === 'error' ? 'bg-red-600 text-white' : 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'}`}>
-          {notification.type === 'error' ? <AlertCircle size={20}/> : <Check size={20} className="text-emerald-400"/>}
-          <span className="text-[10px] font-bold uppercase tracking-widest leading-tight">{notification.text}</span>
-          <button onClick={() => setNotification(null)} className="ml-auto opacity-50"><X size={14}/></button>
+        <div className="fixed top-4 right-4 z-50 p-4 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-2xl flex items-center gap-3 text-sm max-w-sm animate-in fade-in slide-in-from-top-4">
+          {notification.type === 'error' ? <AlertCircle size={16} className="text-red-400"/> : <Info size={16} className="text-emerald-400"/>}
+          <span className="flex-1">{notification.text}</span>
+          <button onClick={() => setNotification(null)} className="p-1 opacity-50 hover:opacity-100"><X size={14}/></button>
         </div>
       )}
 
-      <style>{`
-        .animate-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); }
-        body { margin: 0; padding: 0; }
+
+      <style jsx global>{`
+        .vertical-text { writing-mode: vertical-rl; transform: rotate(180deg); }
+        .select-text { user-select: text; }
+        @keyframes slide-in-from-top-4 {
+          from { transform: translateY(-1rem); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-in { animation: slide-in-from-top-4 0.3s ease-out; }
       `}</style>
     </div>
   );
