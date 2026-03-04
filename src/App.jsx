@@ -201,11 +201,11 @@ export default function App() {
   }, [pages]);
 
   // --- BACKEND PROXY AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a literary assistant.", isTranslation = false) => {
+  const callAi = async (prompt, systemPrompt = "You are a literary assistant.") => {
     setIsAiLoading(true);
     try {
-      // NOTE: Ensure your Flask server is running at this address
-      const response = await fetch("http://localhost:5000/api/chat", {
+      // Relative path is CRITICAL for Vercel Serverless Functions
+      const response = await fetch("/api/chat", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -217,16 +217,13 @@ export default function App() {
 
       const result = await response.json();
       
-      if (result.error) {
-          throw new Error(result.error);
-      }
+      if (result.error) throw new Error(result.error);
 
-      // OpenRouter through Flask returns the OpenAI message structure
       return result.choices?.[0]?.message?.content || "No response generated.";
 
     } catch (err) {
-      console.error("Frontend Chat Error:", err);
-      notify("Backend error. Check Flask terminal logs.", "error");
+      console.error("AI Proxy Error:", err);
+      notify("AI analysis failed. Check Vercel Function Logs.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
