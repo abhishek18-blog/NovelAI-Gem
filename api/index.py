@@ -22,12 +22,10 @@ except ImportError:
 
 app = Flask(__name__)
 
-# UPDATED: Relaxed CORS for production. 
-# Vercel handles the same-origin requests automatically, 
-# but this ensures no blocks occur.
-CORS(app)
+# UPDATED: Securely allow your live domain and local dev environment
+CORS(app, origins=["https://novel-ai-gem.vercel.app", "http://localhost:5173"])
 
-# Vercel Environment Variable (Add this in Vercel Dashboard)
+# Vercel Environment Variable (Must be added in Vercel Dashboard)
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # --- FIREBASE INITIALIZATION ---
@@ -81,20 +79,17 @@ def chat_with_ai():
     except Exception as e:
         return jsonify({"error": f"Backend failed to reach AI: {str(e)}"}), 500
 
-# --- OTHER ROUTES (Ensure they start with /api/) ---
+# --- OTHER ROUTES ---
 
 @app.route('/api/process-link', methods=['POST'])
 def process_link():
     # ... your existing logic ...
-    return jsonify({"message": "Link processing placeholder"})
+    return jsonify({"message": "Link processing logic goes here"})
 
 @app.route('/api/process-pdf', methods=['POST'])
 def process_pdf():
     # ... your existing logic ...
-    return jsonify({"message": "PDF processing placeholder"})
+    return jsonify({"message": "PDF processing logic goes here"})
 
-# IMPORTANT: For Vercel, the app object itself is the entry point.
-# You don't actually need the __main__ block for production, 
-# but it's fine to keep for local testing.
 if __name__ == '__main__':
     app.run(debug=True)
