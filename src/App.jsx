@@ -158,6 +158,11 @@ export default function App() {
   }, [user]);
 
   // --- READING ENGINE ---
+
+//checking connection
+console.log("DEBUG: Sending request to model:", "google/gemini-3.1-flash-lite-preview");
+console.log("DEBUG: Key exists?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
+/****/
   const pages = useMemo(() => {
     const words = text.split(/\s+/).filter(Boolean);
     const res = [];
