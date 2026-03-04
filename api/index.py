@@ -1,7 +1,7 @@
 import os
 import io
 import requests
-import json # Added for payload handling
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from bs4 import BeautifulSoup
@@ -22,11 +22,12 @@ except ImportError:
 
 app = Flask(__name__)
 
-# Allow CORS for your React development server
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
+# UPDATED: Relaxed CORS for production. 
+# Vercel handles the same-origin requests automatically, 
+# but this ensures no blocks occur.
+CORS(app)
 
-# --- OPENROUTER CONFIGURATION ---
-# IMPORTANT: Add OPENROUTER_API_KEY to your environment variables
+# Vercel Environment Variable (Add this in Vercel Dashboard)
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # --- FIREBASE INITIALIZATION ---
@@ -34,15 +35,14 @@ try:
     if HAS_FIREBASE_ADMIN and not firebase_admin._apps:
         firebase_admin.initialize_app()
 except Exception as e:
-    print(f"Firebase Admin initialization skipped or failed: {e}")
+    print(f"Firebase Admin initialization skipped: {e}")
 
-# --- ROUTES ---
+# --- AI ROUTE ---
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
-    """Secure Proxy for OpenRouter AI calls."""
     if not OPENROUTER_KEY:
-        return jsonify({"error": "Backend API Key is missing. Check your .env file."}), 500
+        return jsonify({"error": "Backend API Key is missing in Vercel settings."}), 500
 
     data = request.get_json()
     if not data:
@@ -53,13 +53,11 @@ def chat_with_ai():
     system_prompt = data.get('systemPrompt', 'You are a literary assistant.')
 
     try:
-        # We call OpenRouter from HERE (Server-side)
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {OPENROUTER_KEY}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:5173", # Optional for OpenRouter
                 "X-Title": "NovelQuest"
             },
             data=json.dumps({
@@ -72,10 +70,9 @@ def chat_with_ai():
             timeout=30
         )
         
-        # Check if OpenRouter itself returned an error
         if response.status_code != 200:
             return jsonify({
-                "error": f"OpenRouter rejected the key: {response.status_code}",
+                "error": f"OpenRouter Error: {response.status_code}",
                 "details": response.text
             }), response.status_code
 
@@ -84,17 +81,20 @@ def chat_with_ai():
     except Exception as e:
         return jsonify({"error": f"Backend failed to reach AI: {str(e)}"}), 500
 
-# ... (Keep your existing process_link and process_pdf routes below) ...
+# --- OTHER ROUTES (Ensure they start with /api/) ---
 
 @app.route('/api/process-link', methods=['POST'])
 def process_link():
-    # ... (Your existing code)
-    pass
+    # ... your existing logic ...
+    return jsonify({"message": "Link processing placeholder"})
 
 @app.route('/api/process-pdf', methods=['POST'])
 def process_pdf():
-    # ... (Your existing code)
-    pass
+    # ... your existing logic ...
+    return jsonify({"message": "PDF processing placeholder"})
 
+# IMPORTANT: For Vercel, the app object itself is the entry point.
+# You don't actually need the __main__ block for production, 
+# but it's fine to keep for local testing.
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
