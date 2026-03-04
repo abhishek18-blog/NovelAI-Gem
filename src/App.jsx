@@ -172,7 +172,7 @@ export default function App() {
     return Math.round(((currentPage + 1) / pages.length) * 100);
   }, [currentPage, pages.length, text]);
 
-  // Progress Tracking via Intersection Observer
+  // Progress Tracking
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
       if (isInitialLoad.current) return;
@@ -200,12 +200,12 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- BACKEND PROXY AI ENGINE ---
+  // --- INTEGRATED BACKEND PROXY AI ENGINE ---
   const callAi = async (prompt, systemPrompt = "You are a literary assistant.") => {
     setIsAiLoading(true);
     try {
-      // Relative path is CRITICAL for Vercel Serverless Functions
-      const response = await fetch("/api/chat", {
+      // UPDATED: Relative path for Vercel Monorepo deployment
+      const response = await fetch("/api/chat", { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -217,13 +217,15 @@ export default function App() {
 
       const result = await response.json();
       
-      if (result.error) throw new Error(result.error);
+      if (result.error) {
+          throw new Error(result.error);
+      }
 
       return result.choices?.[0]?.message?.content || "No response generated.";
 
     } catch (err) {
       console.error("AI Proxy Error:", err);
-      notify("AI analysis failed. Check Vercel Function Logs.", "error");
+      notify("AI connection failed. Check Vercel logs.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
@@ -264,7 +266,7 @@ export default function App() {
 
   const handleInsight = async (type) => {
     if (!user) return notify("Sign in for insights", "error");
-    setInsightResult(""); // Clear previous result
+    setInsightResult(""); 
     setInsightType(type);
     let p = ""; let s = "You are a literary analyst.";
     if (type === 'summary') p = "Summarize the key events on this page concisely.";
