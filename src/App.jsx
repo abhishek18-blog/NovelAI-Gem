@@ -204,7 +204,7 @@ export default function App() {
   const callAi = async (prompt, systemPrompt = "You are a literary assistant.", isTranslation = false) => {
     setIsAiLoading(true);
     
-    // Ensure you have VITE_OPENROUTER_API_KEY in your .env file
+    // Check for VITE prefix as required by Vite/Vercel environment variables
     const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY || ""; 
 
     const fetchContent = async (retryCount = 0) => {
@@ -218,8 +218,8 @@ export default function App() {
             'X-Title': 'NovelQuest'
           },
           body: JSON.stringify({
-            // Using the Free Gemini model on OpenRouter
-            "model": "google/gemini-2.0-flash:free", 
+            // Updated to the Gemini 3.1 Flash-Lite Preview model ID
+            "model": "google/gemini-3.1-flash-lite-preview", 
             "messages": [
               { "role": "system", "content": systemPrompt },
               { 
@@ -240,7 +240,6 @@ export default function App() {
         }
 
         const result = await response.json();
-        // Updated to OpenAI/OpenRouter result format
         return result.choices?.[0]?.message?.content || "No response generated.";
       } catch (err) {
         if (retryCount < 3) {
@@ -256,7 +255,7 @@ export default function App() {
       return await fetchContent();
     } catch (err) {
       console.error("AI Request Failed:", err);
-      notify("AI analysis failed. Please check your OpenRouter key.", "error");
+      notify("AI analysis failed. Please verify your VITE_OPENROUTER_API_KEY.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
