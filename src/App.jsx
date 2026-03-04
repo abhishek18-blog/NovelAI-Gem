@@ -157,12 +157,6 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // --- DEBUG LOGS ---
-  useEffect(() => {
-    console.log("DEBUG: Using Model meta-llama/llama-3.3-70b-instruct:free");
-    console.log("DEBUG: OpenRouter Key Loaded?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
-  }, []);
-
   // --- READING ENGINE ---
   const pages = useMemo(() => {
     const words = text.split(/\s+/).filter(Boolean);
@@ -178,7 +172,7 @@ export default function App() {
     return Math.round(((currentPage + 1) / pages.length) * 100);
   }, [currentPage, pages.length, text]);
 
-  // Progress Tracking
+  // Progress Tracking via Intersection Observer
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
       if (isInitialLoad.current) return;
@@ -206,62 +200,33 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- OPENROUTER AI ENGINE (LLAMA 3.3 INTEGRATED) ---
+  // --- BACKEND PROXY AI ENGINE ---
   const callAi = async (prompt, systemPrompt = "You are a literary assistant.", isTranslation = false) => {
     setIsAiLoading(true);
-    
-    const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY || ""; 
-
-    const fetchContent = async (retryCount = 0) => {
-      try {
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENROUTER_KEY}`,
-            'HTTP-Referer': window.location.origin, 
-            'X-Title': 'NovelQuest'
-          },
-          body: JSON.stringify({
-            "model": "meta-llama/llama-3.3-70b-instruct:free", 
-            "messages": [
-              { "role": "system", "content": systemPrompt },
-              { 
-                "role": "user", 
-                "content": `Current Context (Page ${currentPage + 1}):\n${pages[currentPage]}\n\nQuery: ${prompt}` 
-              }
-            ]
-          })
-        });
-
-        if (!response.ok) {
-          const errData = await response.json();
-          console.error("OpenRouter Error Details:", errData);
-          if ((response.status === 429 || response.status >= 500) && retryCount < 3) {
-            const delay = Math.pow(2, retryCount) * 1000;
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return fetchContent(retryCount + 1);
-          }
-          throw new Error(`OpenRouter Error: ${response.status}`);
-        }
-
-        const result = await response.json();
-        return result.choices?.[0]?.message?.content || "No response generated.";
-      } catch (err) {
-        if (retryCount < 3) {
-          const delay = Math.pow(2, retryCount) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return fetchContent(retryCount + 1);
-        }
-        throw err;
-      }
-    };
-
     try {
-      return await fetchContent();
+      // NOTE: Ensure your Flask server is running at this address
+      const response = await fetch("http://localhost:5000/api/chat", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          prompt: prompt, 
+          systemPrompt: systemPrompt,
+          context: pages[currentPage] 
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.error) {
+          throw new Error(result.error);
+      }
+
+      // OpenRouter through Flask returns the OpenAI message structure
+      return result.choices?.[0]?.message?.content || "No response generated.";
+
     } catch (err) {
-      console.error("AI Request Failed:", err);
-      notify("AI connection failed. Verify VITE_OPENROUTER_API_KEY.", "error");
+      console.error("Frontend Chat Error:", err);
+      notify("Backend error. Check Flask terminal logs.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
@@ -302,6 +267,7 @@ export default function App() {
 
   const handleInsight = async (type) => {
     if (!user) return notify("Sign in for insights", "error");
+    setInsightResult(""); // Clear previous result
     setInsightType(type);
     let p = ""; let s = "You are a literary analyst.";
     if (type === 'summary') p = "Summarize the key events on this page concisely.";
