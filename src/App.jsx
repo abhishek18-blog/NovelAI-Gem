@@ -159,8 +159,8 @@ export default function App() {
 
   // --- DEBUG LOGS ---
   useEffect(() => {
-    console.log("DEBUG: Sending request to model:", "google/gemini-3n-e2b-it:free");
-    console.log("DEBUG: Key exists?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
+    console.log("DEBUG: Using Model meta-llama/llama-3.3-70b-instruct:free");
+    console.log("DEBUG: OpenRouter Key Loaded?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
   }, []);
 
   // --- READING ENGINE ---
@@ -178,7 +178,7 @@ export default function App() {
     return Math.round(((currentPage + 1) / pages.length) * 100);
   }, [currentPage, pages.length, text]);
 
-  // Progress Tracking via Intersection Observer
+  // Progress Tracking
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
       if (isInitialLoad.current) return;
@@ -206,11 +206,10 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- OPENROUTER AI ENGINE ---
+  // --- OPENROUTER AI ENGINE (LLAMA 3.3 INTEGRATED) ---
   const callAi = async (prompt, systemPrompt = "You are a literary assistant.", isTranslation = false) => {
     setIsAiLoading(true);
     
-    // Check for VITE prefix as required by Vite/Vercel environment variables
     const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY || ""; 
 
     const fetchContent = async (retryCount = 0) => {
@@ -224,8 +223,7 @@ export default function App() {
             'X-Title': 'NovelQuest'
           },
           body: JSON.stringify({
-            // Updated to the Gemma 3n 2B (free) model ID
-            "model": "google/gemini-3n-e2b-it:free", 
+            "model": "meta-llama/llama-3.3-70b-instruct:free", 
             "messages": [
               { "role": "system", "content": systemPrompt },
               { 
@@ -237,6 +235,8 @@ export default function App() {
         });
 
         if (!response.ok) {
+          const errData = await response.json();
+          console.error("OpenRouter Error Details:", errData);
           if ((response.status === 429 || response.status >= 500) && retryCount < 3) {
             const delay = Math.pow(2, retryCount) * 1000;
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -261,7 +261,7 @@ export default function App() {
       return await fetchContent();
     } catch (err) {
       console.error("AI Request Failed:", err);
-      notify("AI analysis failed. Please verify your VITE_OPENROUTER_API_KEY.", "error");
+      notify("AI connection failed. Verify VITE_OPENROUTER_API_KEY.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
@@ -277,7 +277,7 @@ export default function App() {
 
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
-    if (!file || !user || !isPdfReady) return notify("PDF engine not ready or not signed in", "error");
+    if (!file || !user || !isPdfReady) return notify("PDF engine not ready", "error");
     setIsAiLoading(true);
     try {
       const buf = await file.arrayBuffer();
@@ -326,11 +326,11 @@ export default function App() {
 
   const handleTranslate = async () => {
     const selection = window.getSelection().toString().trim();
-    if (!selection) return notify("Select text in the manuscript to translate", "info");
+    if (!selection) return notify("Select text to translate", "info");
     const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
     const res = await callAi(
-      `Translate this text to ${targetLangName}. Return ONLY the translated text:\n\n${selection.substring(0, 500)}`,
-      `You are a professional literary translator. Preserve tone. Reply with ONLY the translation.`,
+      `Translate to ${targetLangName}. Return ONLY the result:\n\n${selection.substring(0, 500)}`,
+      `You are a professional literary translator. Reply with ONLY the translation.`,
       true
     );
     setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res}` }]);
@@ -345,21 +345,15 @@ export default function App() {
       await signInWithPopup(auth, provider);
       notify("Signed in with Google", "success");
     } catch (err) {
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        notify("Sign-in cancelled", "info");
-      } else if (err.code === 'auth/popup-blocked') {
-        notify("Popup blocked!", "error");
-      } else {
         notify("Authentication failed", "error");
         console.error("Google Auth error:", err);
-      }
     } finally {
       setIsSigningIn(false);
     }
   };
 
   const hardReset = () => {
-    if (confirm("Factory reset app? This clears your local session.")) {
+    if (confirm("Factory reset app?")) {
       localStorage.clear();
       window.location.reload();
     }
@@ -466,14 +460,11 @@ export default function App() {
                       <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto text-amber-500 mb-2">
                         <User size={32}/>
                       </div>
-                      <p className="text-sm text-zinc-500 px-4">Sign in with Google to sync manuscripts across devices.</p>
-                      <button 
-                        onClick={handleGoogleSignIn} 
-                        disabled={isSigningIn}
-                        className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2"
-                      >
+                      <p className="text-sm text-zinc-500 px-4">Sign in with Google to sync manuscripts.</p>
+                      <button onClick={handleGoogleSignIn} disabled={isSigningIn}
+                        className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg transition-transform flex items-center justify-center gap-2">
                         {isSigningIn ? <Loader2 className="animate-spin" size={16} /> : <LogIn size={16} />}
-                        {isSigningIn ? "Authorizing..." : "Continue with Google"}
+                        Continue with Google
                       </button>
                     </div>
                   ) : (
@@ -486,18 +477,18 @@ export default function App() {
                       <div className="space-y-3">
                         <h3 className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Collections</h3>
                         {sources.map(s => (
-                          <div key={s.id} className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${currentDocId === s.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/10' : 'border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
+                          <div key={s.id} className={`p-4 rounded-2xl border flex items-center gap-4 transition-all ${currentDocId === s.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/10' : 'border-zinc-100 dark:hover:bg-zinc-800'}`}>
                             <button onClick={() => { setText(s.content); setCurrentDocName(s.name); setCurrentDocId(s.id); setIsSidebarOpen(false); isInitialLoad.current = true; }} className="flex-1 text-left min-w-0">
                               <p className="text-xs font-bold truncate">{s.name}</p>
                               <p className="text-[10px] text-zinc-400 mt-1">{s.date}</p>
                             </button>
-                            <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sources', s.id))} className="text-zinc-300 hover:text-red-500 transition-colors">
+                            <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'sources', s.id))} className="text-zinc-300 hover:text-red-500">
                               <Trash2 size={16}/>
                             </button>
                           </div>
                         ))}
                       </div>
-                      <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 dark:border-zinc-800 rounded-xl hover:text-red-500 transition-colors mt-8">Sign Out</button>
+                      <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 rounded-xl mt-8">Sign Out</button>
                     </>
                   )}
                 </div>
@@ -505,62 +496,56 @@ export default function App() {
 
               {activeTab === 'insights' && (
                 <div className="space-y-6">
-                  <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-700">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">Translation Language</label>
+                  <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100">
+                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate</label>
                     <div className="flex gap-2">
-                      <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs">
+                      <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-xs">
                         {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
                       </select>
-                      <button onClick={handleTranslate} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-[10px] font-black uppercase transition-transform active:scale-95 shadow-md">Translate</button>
+                      <button onClick={handleTranslate} className="px-4 py-2 bg-amber-500 text-white rounded-xl text-[10px] font-black uppercase shadow-md">Translate</button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <button onClick={() => handleInsight('summary')} className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl flex flex-col items-center gap-2 border border-amber-100 dark:border-amber-900/50 active:scale-95 transition-transform">
-                      <BrainCircuit size={24} className="text-amber-500" /><span className="text-[9px] font-black uppercase tracking-widest">Summary</span>
+                    <button onClick={() => handleInsight('summary')} className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl flex flex-col items-center gap-2 border border-amber-100">
+                      <BrainCircuit size={24} className="text-amber-500" /><span className="text-[9px] font-black uppercase">Summary</span>
                     </button>
-                    <button onClick={() => handleInsight('characters')} className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-2xl flex flex-col items-center gap-2 border border-blue-100 dark:border-blue-900/50 active:scale-95 transition-transform">
-                      <User size={24} className="text-blue-500" /><span className="text-[9px] font-black uppercase tracking-widest">Characters</span>
+                    <button onClick={() => handleInsight('characters')} className="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-2xl flex flex-col items-center gap-2 border border-blue-100">
+                      <User size={24} className="text-blue-500" /><span className="text-[9px] font-black uppercase">Characters</span>
                     </button>
-                    <button onClick={() => handleInsight('weaver')} className="p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl flex flex-col items-center gap-2 border border-purple-100 dark:border-purple-900/50 active:scale-95 transition-transform col-span-2">
-                      <Wand2 size={24} className="text-purple-500" /><span className="text-[9px] font-black uppercase tracking-widest">Story Weaver</span>
+                    <button onClick={() => handleInsight('weaver')} className="p-4 bg-purple-50 dark:bg-purple-900/10 rounded-2xl flex flex-col items-center gap-2 border border-purple-100 col-span-2">
+                      <Wand2 size={24} className="text-purple-500" /><span className="text-[9px] font-black uppercase">Story Weaver</span>
                     </button>
                   </div>
                   {insightResult && (
-                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-3xl border border-zinc-200 dark:border-zinc-700 animate-in fade-in slide-in-from-bottom-2 duration-500 shadow-sm">
+                    <div className="p-6 bg-zinc-50 dark:bg-zinc-800/50 rounded-3xl border border-zinc-200 shadow-sm animate-in">
                       <div className="text-sm leading-relaxed whitespace-pre-wrap font-serif text-zinc-800 dark:text-zinc-200">{insightResult}</div>
                       <button onClick={() => {
                         setChatHistory(prev => [...prev, {role:'bot', content: `**✨ Magic Insight (${insightType}):**\n${insightResult}`}]);
                         setActiveTab('chat');
-                      }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 dark:border-amber-900 rounded-xl hover:bg-amber-50 transition-colors">Add to Chat</button>
+                      }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 rounded-xl">Add to Chat</button>
                     </div>
                   )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Consulting the Muse...</p></div>}
+                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Consulting...</p></div>}
                 </div>
               )}
 
               {activeTab === 'chat' && (
                 <div className="flex flex-col h-full space-y-4">
-                  <div className="flex-1 space-y-4 overflow-y-auto pr-2 custom-scrollbar pb-20">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30 px-6"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase tracking-widest">Ask about the story...</p></div>}
+                  <div className="flex-1 space-y-4 overflow-y-auto pb-20 custom-scrollbar">
+                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the story...</p></div>}
                     {chatHistory.map((m, i) => (
                       <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-tl-none border border-zinc-200 dark:border-zinc-700'}`}>
+                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 rounded-tl-none border'}`}>
                           {m.content}
                         </div>
                       </div>
                     ))}
                   </div>
-                  
-                  <div className="fixed md:absolute bottom-[72px] md:bottom-0 left-0 right-0 p-4 bg-white dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 md:border-none z-10">
+                  <div className="fixed md:absolute bottom-[72px] md:bottom-0 left-0 right-0 p-4 bg-white dark:bg-zinc-900 border-t md:border-none z-10">
                     <div className="relative">
-                      <input 
-                        value={userInput} 
-                        onChange={e=>setUserInput(e.target.value)} 
-                        onKeyDown={e=>e.key==='Enter'&&handleChat()} 
-                        placeholder="Ask AI..." 
-                        className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" 
-                      />
-                      <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg hover:bg-amber-600 active:scale-90 transition-all">
+                      <input value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleChat()} 
+                        placeholder="Ask AI..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
+                      <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg active:scale-90 transition-all">
                         <Send size={18}/>
                       </button>
                     </div>
@@ -571,7 +556,7 @@ export default function App() {
               {activeTab === 'navigator' && (
                 <div className="grid grid-cols-4 gap-3">
                   {pages.map((_, i) => (
-                    <button key={i} onClick={() => scrollToPage(i)} className={`aspect-square rounded-2xl border-2 flex items-center justify-center text-xs font-black transition-all ${currentPage === i ? 'bg-amber-500 text-white border-amber-500 shadow-xl scale-110' : 'border-zinc-100 dark:border-zinc-800 hover:border-amber-200'}`}>
+                    <button key={i} onClick={() => scrollToPage(i)} className={`aspect-square rounded-2xl border-2 flex items-center justify-center text-xs font-black transition-all ${currentPage === i ? 'bg-amber-500 text-white border-amber-500 shadow-xl scale-110' : 'border-zinc-100 dark:border-zinc-800'}`}>
                       {i + 1}
                     </button>
                   ))}
@@ -582,21 +567,21 @@ export default function App() {
         </aside>
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-around items-center z-[110] shadow-[0_-8px_30px_rgba(0,0,0,0.15)] px-2">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-around items-center z-[110] px-2 shadow-[0_-8px_30px_rgba(0,0,0,0.1)]">
         <NavItem id="library" icon={Library} label="Library" />
         <NavItem id="insights" icon={Sparkles} label="Magic" />
         <NavItem id="chat" icon={MessageSquare} label="Chat" />
         <NavItem id="navigator" icon={Layers} label="Pages" />
-        <button onClick={hardReset} className="flex flex-col items-center p-2 text-zinc-400 active:text-red-500 transition-colors">
+        <button onClick={hardReset} className="flex flex-col items-center p-2 text-zinc-400">
           <RefreshCw size={20} />
-          <span className="text-[9px] font-black uppercase tracking-tight">Reset</span>
+          <span className="text-[9px] font-black uppercase">Reset</span>
         </button>
       </nav>
 
       {notification && (
-        <div className={`fixed bottom-20 md:bottom-10 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-xs p-4 rounded-3xl shadow-2xl z-[200] flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300 border border-zinc-100 dark:border-zinc-800 ${notification.type === 'error' ? 'bg-red-600 text-white' : 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900'}`}>
-          {notification.type === 'error' ? <AlertCircle size={20}/> : <Check size={20} className="text-emerald-400"/>}
-          <span className="text-[10px] font-bold uppercase tracking-widest leading-tight">{notification.text}</span>
+        <div className={`fixed bottom-20 md:bottom-10 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-xs p-4 rounded-3xl shadow-2xl z-[200] flex items-center gap-3 animate-in border ${notification.type === 'error' ? 'bg-red-600 text-white' : 'bg-zinc-900 text-white'}`}>
+          {notification.type === 'error' ? <AlertCircle size={20}/> : <Check size={20}/>}
+          <span className="text-[10px] font-bold uppercase tracking-widest">{notification.text}</span>
           <button onClick={() => setNotification(null)} className="ml-auto opacity-50"><X size={14}/></button>
         </div>
       )}
@@ -605,9 +590,7 @@ export default function App() {
         .animate-in { animation: fadeIn 0.3s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.05); }
         body { margin: 0; padding: 0; }
       `}</style>
     </div>
