@@ -157,12 +157,13 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // --- READING ENGINE ---
+  // --- DEBUG LOGS ---
+  useEffect(() => {
+    console.log("DEBUG: Sending request to model:", "google/gemini-3n-e2b-it:free");
+    console.log("DEBUG: Key exists?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
+  }, []);
 
-//checking connection
-console.log("DEBUG: Sending request to model:", "google/gemini-3.1-flash-lite-preview");
-console.log("DEBUG: Key exists?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
-/****/
+  // --- READING ENGINE ---
   const pages = useMemo(() => {
     const words = text.split(/\s+/).filter(Boolean);
     const res = [];
@@ -223,8 +224,8 @@ console.log("DEBUG: Key exists?", !!import.meta.env.VITE_OPENROUTER_API_KEY);
             'X-Title': 'NovelQuest'
           },
           body: JSON.stringify({
-            // Updated to the Gemini 3.1 Flash-Lite Preview model ID
-            "model": "google/gemini-3.1-flash-lite-preview", 
+            // Updated to the Gemma 3n 2B (free) model ID
+            "model": "google/gemini-3n-e2b-it:free", 
             "messages": [
               { "role": "system", "content": systemPrompt },
               { 
