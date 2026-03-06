@@ -7,13 +7,14 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Use a default empty string to prevent crashes if key is missing
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
+# 1. UPDATED: Pulling the Groq API key instead of OpenRouter
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
-    if not OPENROUTER_KEY:
-        return jsonify({"error": "API Key missing in Vercel Environment Variables"}), 500
+    if not GROQ_KEY:
+        # UPDATED: Error message reflects the new key
+        return jsonify({"error": "GROQ_API_KEY missing in Environment Variables"}), 500
 
     try:
         data = request.get_json()
@@ -23,24 +24,26 @@ def chat_with_ai():
         
         # Reduced timeout to 15s to stay near Vercel limits
         response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
+            # 2. UPDATED: The new Groq API endpoint URL
+            url="https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Authorization": f"Bearer {GROQ_KEY}",
                 "Content-Type": "application/json",
-                "X-Title": "NovelQuest"
+                # 3. UPDATED: Removed "X-Title" as Groq doesn't need it
             },
-            data=json.dumps({
-                "model": "meta-llama/llama-3.3-70b-instruct:free",
+            json={
+                # 4. UPDATED: Swapped to Groq's fastest large model
+                "model": "llama-3.3-70b-versatile",
                 "messages": [
                     {"role": "user", "content": f"Context: {context}\n\nQuestion: {prompt}"}
                 ]
-            }),
+            },
             timeout=15 
         )
         
-        # Return the actual status from OpenRouter if it's not 200
+        # Return the actual status from Groq if it's not 200
         if response.status_code != 200:
-            return jsonify({"error": "OpenRouter Error", "details": response.text}), response.status_code
+            return jsonify({"error": "Groq API Error", "details": response.text}), response.status_code
 
         return jsonify(response.json())
 
