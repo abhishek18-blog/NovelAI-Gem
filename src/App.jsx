@@ -201,18 +201,22 @@ export default function App() {
   }, [pages]);
 
   // --- INTEGRATED BACKEND PROXY AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a literary assistant.") => {
+  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant.") => {
     setIsAiLoading(true);
     try {
-      // Combine system prompt and user prompt so the simple Groq backend gets all context
-      const combinedPrompt = `${systemPrompt}\n\nUser Request: ${prompt}`;
+      // Create a strict instruction frame so the AI doesn't get confused by the book text
+      const strictPrompt = `INSTRUCTIONS: ${systemPrompt} 
+Please answer the user's question below. Use the provided context if it is helpful, but if the answer isn't in the context, use your general knowledge to explain it clearly.
+
+USER QUESTION: ${prompt}`;
 
       const response = await fetch("/api/chat", { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          prompt: combinedPrompt, 
-          context: pages[currentPage] || "No context provided."
+          prompt: strictPrompt, 
+          // Wrap the context in clear boundaries
+          context: `--- START OF BOOK PAGE ---\n${pages[currentPage] || "No context provided."}\n--- END OF BOOK PAGE ---` 
         })
       });
 
@@ -453,7 +457,7 @@ export default function App() {
                           </div>
                         ))}
                       </div>
-                      <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 rounded-xl mt-8">Sign Out</button>
+                        <button onClick={() => signOut(auth)} className="w-full py-3 text-[10px] font-black uppercase text-zinc-400 border border-zinc-100 rounded-xl mt-8">Sign Out</button>
                     </>
                   )}
                 </div>
