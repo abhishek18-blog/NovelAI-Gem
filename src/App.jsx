@@ -200,21 +200,17 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- INTEGRATED BACKEND PROXY AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant.") => {
+  // --- INTEGRATED BACKEND PROXY AI ENGINE (STRUCTURED FOR GROQ) ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. If the answer to a question is not in the manuscript text, use your general knowledge to answer. Be concise.") => {
     setIsAiLoading(true);
     try {
-      const strictPrompt = `INSTRUCTIONS: ${systemPrompt} 
-Please answer the user's question below. Use the provided context if it is helpful, but if the answer isn't in the context, use your general knowledge to explain it clearly.
-
-USER QUESTION: ${prompt}`;
-
       const response = await fetch("/api/chat", { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          prompt: strictPrompt, 
-          context: `--- START OF BOOK PAGE ---\n${pages[currentPage] || "No context provided."}\n--- END OF BOOK PAGE ---` 
+          systemPrompt: systemPrompt,  // Sent separately for better AI focus
+          prompt: prompt,              // The actual user question
+          context: pages[currentPage]  // The book text
         })
       });
 
@@ -228,7 +224,7 @@ USER QUESTION: ${prompt}`;
 
     } catch (err) {
       console.error("AI Proxy Error:", err);
-      notify("AI connection failed. Check browser console.", "error");
+      notify("AI connection failed.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
@@ -284,7 +280,7 @@ USER QUESTION: ${prompt}`;
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // --- UPDATED CHAT HANDLER ---
+  // --- SMART CHAT HANDLER ---
   const handleChat = async () => {
     if (!userInput.trim() || isAiLoading || !text.trim() || !user) return;
     const q = userInput.trim(); 
