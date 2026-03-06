@@ -204,14 +204,15 @@ export default function App() {
   const callAi = async (prompt, systemPrompt = "You are a literary assistant.") => {
     setIsAiLoading(true);
     try {
-      // UPDATED: Relative path for Vercel Monorepo deployment
+      // Combine system prompt and user prompt so the simple Groq backend gets all context
+      const combinedPrompt = `${systemPrompt}\n\nUser Request: ${prompt}`;
+
       const response = await fetch("/api/chat", { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          prompt: prompt, 
-          systemPrompt: systemPrompt,
-          context: pages[currentPage] 
+          prompt: combinedPrompt, 
+          context: pages[currentPage] || "No context provided."
         })
       });
 
@@ -225,7 +226,7 @@ export default function App() {
 
     } catch (err) {
       console.error("AI Proxy Error:", err);
-      notify("AI connection failed. Check Vercel logs.", "error");
+      notify("AI connection failed. Check browser console.", "error");
       return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
@@ -295,8 +296,7 @@ export default function App() {
     const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
     const res = await callAi(
       `Translate to ${targetLangName}. Return ONLY the result:\n\n${selection.substring(0, 500)}`,
-      `You are a professional literary translator. Reply with ONLY the translation.`,
-      true
+      `You are a professional literary translator. Reply with ONLY the translation.`
     );
     setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res}` }]);
     setActiveTab('chat'); setIsSidebarOpen(true);
