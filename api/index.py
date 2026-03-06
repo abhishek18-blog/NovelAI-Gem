@@ -11,7 +11,7 @@ GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
-    # Safety check: Ensure the server has access to your API key
+    # 1. Safety check: Ensure the server has access to your API key
     if not GROQ_KEY:
         return jsonify({
             "error": "GROQ_API_KEY missing in Environment Variables"
@@ -20,14 +20,13 @@ def chat_with_ai():
     try:
         data = request.get_json()
         
-        # 1. Data Extraction: Get instructions, question, and book context
-        # We use .get() to provide default values if the frontend forgets a key
+        # 2. Data Extraction: Provide default values if the frontend forgets a key
         system_instructions = data.get('systemPrompt', "You are a helpful literary assistant.")
         user_question = data.get('prompt', 'Hello')
         book_context = data.get('context', '')
 
-        # 2. Call the Groq API using the Llama 3 structure
-        # We place instructions in the 'system' role and data in the 'user' role
+        # 3. Call the Groq API using the Role-Based Structure
+        # System role = Instructions | User role = Data + Question
         response = requests.post(
             url="https://api.groq.com/openai/v1/chat/completions",
             headers={
@@ -37,20 +36,23 @@ def chat_with_ai():
             json={
                 "model": "llama-3.3-70b-versatile",
                 "messages": [
-                    {"role": "system", "content": system_instructions},
+                    {
+                        "role": "system", 
+                        "content": f"{system_instructions} Important: If the answer is not in the text, use your own knowledge. Never just repeat the context text."
+                    },
                     {
                         "role": "user", 
-                        "content": f"MANUSCRIPT PAGE:\n{book_context}\n\nQUESTION: {user_question}"
+                        "content": f"### MANUSCRIPT CONTEXT ###\n{book_context}\n\n### USER QUESTION ###\n{user_question}"
                     }
                 ],
-                # Temperature 0.5 makes the AI more factual and less likely to wander
-                "temperature": 0.5 
+                # Temperature 0.3 makes the AI factual and disciplined
+                "temperature": 0.3
             },
             # 15s timeout to prevent Vercel function hangs
-            timeout=15 
+            timeout=15
         )
         
-        # 3. Success Check: Return Groq's answer if status is 200 (OK)
+        # 4. Success Check: Return Groq's answer if status is 200 (OK)
         if response.status_code != 200:
             return jsonify({
                 "error": "Groq API Error", 
@@ -59,7 +61,7 @@ def chat_with_ai():
 
         return jsonify(response.json())
 
-    # 4. Specific Error Handling
+    # 5. Specific Error Handling
     except requests.exceptions.Timeout:
         return jsonify({
             "error": "AI took too long to respond. Try a shorter request."
