@@ -200,27 +200,26 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- INTEGRATED BACKEND PROXY AI ENGINE (STRUCTURED FOR GROQ) ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. If the answer to a question is not in the manuscript text, use your general knowledge to answer. Be concise.") => {
+  // --- INTEGRATED BACKEND PROXY AI ENGINE ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. If the answer is not in the manuscript text, use your general knowledge to answer. Be direct and concise.") => {
     setIsAiLoading(true);
     try {
       const response = await fetch("/api/chat", { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          systemPrompt: systemPrompt,  // Sent separately for better AI focus
-          prompt: prompt,              // The actual user question
-          context: pages[currentPage]  // The book text
+          systemPrompt: systemPrompt, 
+          prompt: prompt, 
+          context: pages[currentPage] || ""
         })
       });
 
       const result = await response.json();
-      
-      if (result.error) {
-          throw new Error(result.error);
-      }
+      if (result.error) throw new Error(result.error);
 
-      return result.choices?.[0]?.message?.content || "No response generated.";
+      // Extract the content and clean any leftover dashes
+      let answer = result.choices?.[0]?.message?.content || "No response generated.";
+      return answer.replace(/^-+/g, '').trim(); 
 
     } catch (err) {
       console.error("AI Proxy Error:", err);
@@ -287,23 +286,17 @@ export default function App() {
     setUserInput("");
     setChatHistory(prev => [...prev, { role: 'user', content: q }]);
 
-    const lowerQ = q.toLowerCase();
+    const lowerQ = q.toLowerCase().replace(/\s/g, ''); // Remove spaces to catch 'thankyou'
 
-    // 1. Handle Greetings
-    const greetings = ['hi', 'hello', 'hey', 'namaste', 'yo', 'sup'];
-    if (greetings.some(g => lowerQ === g || lowerQ.startsWith(g + " "))) {
-      setChatHistory(prev => [...prev, { role: 'bot', content: "Hey! I'm your Novel Quest assistant. Ready to dive back into the story? Ask me anything about the manuscript!" }]);
+    // 1. Handle Greetings & Appreciation (Skip API call)
+    const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou', 'great', 'awesome'];
+    if (social.some(s => lowerQ.startsWith(s))) {
+      const reply = lowerQ.includes('thank') ? "You're very welcome! I'm here to help." : "Hello! I'm ready. Ask me anything about the manuscript!";
+      setChatHistory(prev => [...prev, { role: 'bot', content: reply }]);
       return; 
     }
 
-    // 2. Handle Appreciation
-    const appreciation = ['thanks', 'thank you', 'great', 'awesome', 'cool', 'nice', 'helpful', 'wow'];
-    if (appreciation.some(a => lowerQ.includes(a))) {
-      setChatHistory(prev => [...prev, { role: 'bot', content: "You're very welcome! I'm glad I could help. What else is on your mind?" }]);
-      return;
-    }
-
-    // 3. Handle Actual Questions via AI
+    // 2. Handle Questions
     const res = await callAi(q);
     setChatHistory(prev => [...prev, { role: 'bot', content: res }]);
   };
