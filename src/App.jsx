@@ -204,7 +204,6 @@ export default function App() {
   const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant.") => {
     setIsAiLoading(true);
     try {
-      // Create a strict instruction frame so the AI doesn't get confused by the book text
       const strictPrompt = `INSTRUCTIONS: ${systemPrompt} 
 Please answer the user's question below. Use the provided context if it is helpful, but if the answer isn't in the context, use your general knowledge to explain it clearly.
 
@@ -215,7 +214,6 @@ USER QUESTION: ${prompt}`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           prompt: strictPrompt, 
-          // Wrap the context in clear boundaries
           context: `--- START OF BOOK PAGE ---\n${pages[currentPage] || "No context provided."}\n--- END OF BOOK PAGE ---` 
         })
       });
@@ -286,10 +284,30 @@ USER QUESTION: ${prompt}`;
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // --- UPDATED CHAT HANDLER ---
   const handleChat = async () => {
     if (!userInput.trim() || isAiLoading || !text.trim() || !user) return;
-    const q = userInput; setUserInput("");
+    const q = userInput.trim(); 
+    setUserInput("");
     setChatHistory(prev => [...prev, { role: 'user', content: q }]);
+
+    const lowerQ = q.toLowerCase();
+
+    // 1. Handle Greetings
+    const greetings = ['hi', 'hello', 'hey', 'namaste', 'yo', 'sup'];
+    if (greetings.some(g => lowerQ === g || lowerQ.startsWith(g + " "))) {
+      setChatHistory(prev => [...prev, { role: 'bot', content: "Hey! I'm your Novel Quest assistant. Ready to dive back into the story? Ask me anything about the manuscript!" }]);
+      return; 
+    }
+
+    // 2. Handle Appreciation
+    const appreciation = ['thanks', 'thank you', 'great', 'awesome', 'cool', 'nice', 'helpful', 'wow'];
+    if (appreciation.some(a => lowerQ.includes(a))) {
+      setChatHistory(prev => [...prev, { role: 'bot', content: "You're very welcome! I'm glad I could help. What else is on your mind?" }]);
+      return;
+    }
+
+    // 3. Handle Actual Questions via AI
     const res = await callAi(q);
     setChatHistory(prev => [...prev, { role: 'bot', content: res }]);
   };
