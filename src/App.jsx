@@ -79,7 +79,6 @@ export default function App() {
   const [insightType, setInsightType] = useState(null);
   const [isPdfReady, setIsPdfReady] = useState(false);
   const [selectedLang, setSelectedLang] = useState('hi');
-  const [chatMode, setChatMode] = useState('strict'); 
   
   const isInitialLoad = useRef(true);
 
@@ -201,74 +200,33 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- INTEGRATED: STREAMING AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant.") => {
+  // --- INTEGRATED BACKEND PROXY AI ENGINE ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. If the answer is not in the manuscript text, use your general knowledge to answer. Be direct and concise.") => {
     setIsAiLoading(true);
-    const botMsgId = Date.now();
-    
-    // Add streaming placeholder to history
-    setChatHistory(prev => [...prev, { 
-      id: botMsgId, role: 'bot', content: '', thought: '', isStreaming: true 
-    }]);
-
-    let finalAnswer = "";
-
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch("/api/chat", { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          prompt, 
-          systemPrompt,
-          context: pages[currentPage] || "", 
-          mode: chatMode 
+          systemPrompt: systemPrompt, 
+          prompt: prompt, 
+          context: pages[currentPage] || ""
         })
       });
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let fullText = "";
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Extract the content and clean any leftover dashes
+      let answer = result.choices?.[0]?.message?.content || "No response generated.";
+      return answer.replace(/^-+/g, '').trim(); 
 
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n\n');
-
-        lines.forEach(line => {
-          if (!line.startsWith('data: ')) return;
-          try {
-            const { token } = JSON.parse(line.replace('data: ', ''));
-            fullText += token;
-
-            // Split "Thought" from "Answer" in real-time
-            let thought = "";
-            let answer = fullText;
-            if (fullText.includes("<think>")) {
-              const parts = fullText.split("</think>");
-              thought = parts[0].replace("<think>", "").trim();
-              answer = parts[1] ? parts[1].trim() : "";
-            }
-
-            finalAnswer = answer; // Keep track of latest answer for return value
-
-            setChatHistory(prev => prev.map(msg => 
-              msg.id === botMsgId ? { ...msg, content: answer, thought: thought } : msg
-            ));
-          } catch (e) {}
-        });
-      }
-      return finalAnswer; // Return for Insights/Translation handlers
     } catch (err) {
-      console.error("Stream Error:", err);
-      notify("Connection failed", "error");
-      return "";
+      console.error("AI Proxy Error:", err);
+      notify("AI connection failed.", "error");
+      return "AI connection failed.";
     } finally {
       setIsAiLoading(false);
-      setChatHistory(prev => prev.map(msg => 
-        msg.id === botMsgId ? { ...msg, isStreaming: false } : msg
-      ));
     }
   };
 
@@ -308,14 +266,12 @@ export default function App() {
     if (!user) return notify("Sign in for insights", "error");
     setInsightResult(""); 
     setInsightType(type);
-    let p = ""; let s = "You are a literary analyst scholar.";
+    let p = ""; let s = "You are a literary analyst.";
     if (type === 'summary') p = "Summarize the key events on this page concisely.";
     if (type === 'characters') p = "Identify characters on this page and their current motivations.";
     if (type === 'weaver') p = "Suggest 3 creative plot directions based on the current scene.";
-    
-    // Insights now return text for the results box
-    const result = await callAi(p, s);
-    setInsightResult(result);
+    const res = await callAi(p, s);
+    setInsightResult(res);
   };
 
   const notify = (msg, type = 'info') => {
@@ -330,15 +286,19 @@ export default function App() {
     setUserInput("");
     setChatHistory(prev => [...prev, { role: 'user', content: q }]);
 
-    const lowerQ = q.toLowerCase().replace(/\s/g, '');
-    const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou'];
+    const lowerQ = q.toLowerCase().replace(/\s/g, ''); // Remove spaces to catch 'thankyou'
+
+    // 1. Handle Greetings & Appreciation (Skip API call)
+    const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou', 'great', 'awesome'];
     if (social.some(s => lowerQ.startsWith(s))) {
-      const reply = lowerQ.includes('thank') ? "You're very welcome! Happy to help." : "Hello! I'm your literary guide. Ask me anything about this manuscript!";
-      setChatHistory(prev => [...prev, { role: 'bot', content: reply, thought: "Greeting handled locally." }]);
+      const reply = lowerQ.includes('thank') ? "You're very welcome! I'm here to help." : "Hello! I'm ready. Ask me anything about the manuscript!";
+      setChatHistory(prev => [...prev, { role: 'bot', content: reply }]);
       return; 
     }
 
-    await callAi(q);
+    // 2. Handle Questions
+    const res = await callAi(q);
+    setChatHistory(prev => [...prev, { role: 'bot', content: res }]);
   };
 
   const handleTranslate = async () => {
@@ -346,11 +306,10 @@ export default function App() {
     if (!selection) return notify("Select text to translate", "info");
     const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
     const res = await callAi(
-        `Translate this text to ${targetLangName}:\n\n${selection.substring(0, 500)}`,
-        `You are a professional literary translator. Provide ONLY the translation.`
+      `Translate to ${targetLangName}. Return ONLY the result:\n\n${selection.substring(0, 500)}`,
+      `You are a professional literary translator. Reply with ONLY the translation.`
     );
-    // Translation result logic is handled by callAi updating chat, 
-    // but we ensure we are in the chat tab to see it.
+    setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res}` }]);
     setActiveTab('chat'); setIsSidebarOpen(true);
   };
 
@@ -514,7 +473,7 @@ export default function App() {
               {activeTab === 'insights' && (
                 <div className="space-y-6">
                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100">
-                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate Selection</label>
+                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate</label>
                     <div className="flex gap-2">
                       <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-xs">
                         {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
@@ -542,64 +501,28 @@ export default function App() {
                       }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 rounded-xl">Add to Chat</button>
                     </div>
                   )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Analyzing Context...</p></div>}
+                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Consulting...</p></div>}
                 </div>
               )}
 
               {activeTab === 'chat' && (
                 <div className="flex flex-col h-full space-y-4">
-                  {/* MODE TOGGLE BAR */}
-                  <div className="flex items-center justify-between p-2 mb-4 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
-                    <div className="flex items-center gap-2 px-2">
-                      <BrainCircuit size={14} className={chatMode === 'strict' ? 'text-amber-500' : 'text-zinc-400'} />
-                      <span className="text-[9px] font-black uppercase tracking-widest">Mode: {chatMode}</span>
-                    </div>
-                    <button 
-                      onClick={() => setChatMode(m => m === 'strict' ? 'global' : 'strict')}
-                      className="text-[9px] font-black uppercase bg-amber-500 text-white px-3 py-1 rounded-lg shadow-sm active:scale-95 transition-transform"
-                    >
-                      Switch to {chatMode === 'strict' ? 'Global' : 'Strict'}
-                    </button>
-                  </div>
-
-                  <div className="flex-1 space-y-6 overflow-y-auto pb-24 custom-scrollbar">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the characters or plot...</p></div>}
-                    
+                  <div className="flex-1 space-y-4 overflow-y-auto pb-20 custom-scrollbar">
+                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the story...</p></div>}
                     {chatHistory.map((m, i) => (
-                      <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} space-y-2`}>
-                        
-                        {/* REASONING COMPONENT */}
-                        {m.role === 'bot' && m.thought && (
-                          <details className="max-w-[85%] group">
-                            <summary className="text-[10px] font-black uppercase text-zinc-400 cursor-pointer hover:text-amber-500 flex items-center gap-2 list-none bg-zinc-50 dark:bg-zinc-800/30 px-3 py-1 rounded-full border border-zinc-100 dark:border-zinc-800 transition-all">
-                              <BrainCircuit size={12} /> 
-                              <span>AI Logic Process</span>
-                            </summary>
-                            <div className="mt-2 p-4 bg-amber-50/30 dark:bg-amber-900/10 border-l-2 border-amber-500 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400 font-serif italic rounded-r-2xl">
-                              {m.thought}
-                            </div>
-                          </details>
-                        )}
-
-                        {/* MESSAGE BUBBLE */}
-                        <div className={`max-w-[90%] p-4 rounded-[1.5rem] text-sm leading-relaxed ${
-                          m.role === 'user' 
-                          ? 'bg-amber-500 text-white rounded-tr-none shadow-lg shadow-amber-500/10' 
-                          : 'bg-white dark:bg-zinc-900 rounded-tl-none border border-zinc-200 dark:border-zinc-800'
-                        }`}>
+                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 rounded-tl-none border'}`}>
                           {m.content}
-                          {m.isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-amber-500 animate-pulse rounded-sm" />}
                         </div>
                       </div>
                     ))}
                   </div>
-                  
                   <div className="fixed md:absolute bottom-[72px] md:bottom-0 left-0 right-0 p-4 bg-white dark:bg-zinc-900 border-t md:border-none z-10">
                     <div className="relative">
                       <input value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleChat()} 
-                        placeholder="Ask AI scholarly questions..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
+                        placeholder="Ask AI..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
                       <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg active:scale-90 transition-all">
-                        {isAiLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18}/>}
+                        <Send size={18}/>
                       </button>
                     </div>
                   </div>
@@ -620,7 +543,6 @@ export default function App() {
         </aside>
       </div>
 
-      {/* MOBILE NAVIGATION BAR */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-around items-center z-[110] px-2 shadow-[0_-8px_30px_rgba(0,0,0,0.1)]">
         <NavItem id="library" icon={Library} label="Library" />
         <NavItem id="insights" icon={Sparkles} label="Magic" />
@@ -632,7 +554,6 @@ export default function App() {
         </button>
       </nav>
 
-      {/* NOTIFICATION TOAST */}
       {notification && (
         <div className={`fixed bottom-20 md:bottom-10 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-xs p-4 rounded-3xl shadow-2xl z-[200] flex items-center gap-3 animate-in border ${notification.type === 'error' ? 'bg-red-600 text-white' : 'bg-zinc-900 text-white'}`}>
           {notification.type === 'error' ? <AlertCircle size={20}/> : <Check size={20}/>}
@@ -647,7 +568,6 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
         body { margin: 0; padding: 0; }
-        details > summary::-webkit-details-marker { display: none; }
       `}</style>
     </div>
   );
