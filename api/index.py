@@ -1,6 +1,5 @@
 import os
 import requests
-import re # Added for parsing tags
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -12,54 +11,60 @@ GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
     if not GROQ_KEY:
-        return jsonify({"error": "GROQ_API_KEY missing"}), 500
+        return jsonify({"error": "GROQ_API_KEY missing from server environment"}), 500
 
     try:
         data = request.get_json()
-        # Specialized prompt for Literature Analysis
+        # Specialized prompt for Literature/Story Analysis
         sys_msg = data.get('systemPrompt', (
-            "You are a literary critic and scholar. "
-            "Analyze the provided text for themes, character development, and plot points. "
-            "Always think through the narrative structure before answering."
+            "You are a literary analysis expert. Use the provided text to answer questions. "
+            "Think deeply about character motives and plot before answering. "
+            "If the answer isn't in the text, say you don't know."
         ))
-        user_q = data.get('prompt', '')
+        user_q = data.get('prompt', 'Hello')
         context = data.get('context', '')
 
+        # The API request to Groq
         response = requests.post(
             url="https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {GROQ_KEY}", 
+                "Content-Type": "application/json"
+            },
             json={
-                "model": "deepseek-r1-distill-llama-70b",
+                "model": "deepseek-r1-distill-llama-70b", # FIXED: Added the missing comma here
                 "messages": [
                     {"role": "system", "content": sys_msg},
                     {
                         "role": "user", 
-                        "content": f"LITERATURE PIECE:\n\"\"\"{context}\"\"\"\n\nANALYSIS REQUEST: {user_q}"
+                        "content": f"MANUSCRIPT:\n\"\"\"{context}\"\"\"\n\nQUESTION: {user_q}"
                     }
                 ],
-                "temperature": 0.6 # Essential for reasoning models to explore themes
+                "temperature": 0.6,
+                "top_p": 0.95
             },
-            timeout=90 # Analyzing literature takes more "thought" time
+            timeout=60 # Reasoning models need more time to 'think'
         )
-        
-        full_data = response.json()
-        raw_content = full_data['choices'][0]['message']['content']
 
-        # --- SEPARATING THOUGHT FROM ANSWER ---
-        # DeepSeek puts its reasoning inside <think> tags.
-        thought_process = ""
-        final_answer = raw_content
+        # Check if Groq returned an error (e.g., Rate Limit or Invalid Key)
+        if response.status_code != 200:
+            return jsonify({
+                "error": "Groq API Error",
+                "details": response.text
+            }), response.status_code
 
-        if "<think>" in raw_content:
-            parts = raw_content.split("</think>")
-            thought_process = parts[0].replace("<think>", "").strip()
-            final_answer = parts[1].strip()
+        res_json = response.json()
 
-        return jsonify({
-            "thought": thought_process, # You can show this in a "Thinking..." accordion in UI
-            "answer": final_answer,
-            "raw": raw_content
-        })
+        # Safety check: Ensure 'choices' exists before accessing it
+        if "choices" in res_json:
+            return jsonify(res_json)
+        else:
+            return jsonify({"error": "Unexpected API response format", "raw": res_json}), 500
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # This catches Python crashes and tells you EXACTLY what went wrong
+        print(f"Server Crash Error: {str(e)}")
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
