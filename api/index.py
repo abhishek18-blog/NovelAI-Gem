@@ -13,7 +13,8 @@ GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
     if not GROQ_KEY:
-        def key_err(): yield f"data: {json.dumps({'error': 'GROQ_API_KEY missing in Vercel settings'})}\n\n"
+        def key_err(): 
+            yield f"data: {json.dumps({'error': 'GROQ_API_KEY missing in Vercel settings'})}\n\n"
         return Response(stream_with_context(key_err()), mimetype='text/event-stream')
 
     try:
@@ -26,10 +27,18 @@ def chat_with_ai():
         MODEL_ID = "deepseek-r1-distill-llama-70b"
 
         def generate():
+            # NECESSARY CHANGE: Strengthened prompts to force Chain-of-Thought
             if mode == 'strict':
-                sys_msg = "STRICT MODE: Use ONLY the provided text. Think step-by-step using <think> tags. If not in text, say so."
+                sys_msg = (
+                    "STRICT MODE: Use ONLY the provided manuscript. "
+                    "You MUST think step-by-step inside <think> tags before answering. "
+                    "If information isn't in the text, say you don't know."
+                )
             else:
-                sys_msg = "GLOBAL MODE: Use the text + your knowledge. Think step-by-step using <think> tags."
+                sys_msg = (
+                    "GLOBAL MODE: Use the manuscript + your knowledge. "
+                    "You MUST think step-by-step inside <think> tags to compare your knowledge with the text."
+                )
 
             payload = {
                 "model": MODEL_ID,
@@ -42,24 +51,31 @@ def chat_with_ai():
             }
 
             try:
+                # Increased timeout to 90s to allow for deep 'thinking' time
                 response = requests.post(
                     url="https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+                    headers={
+                        "Authorization": f"Bearer {GROQ_KEY}", 
+                        "Content-Type": "application/json"
+                    },
                     json=payload,
                     stream=True,
-                    timeout=60
+                    timeout=90 
                 )
 
                 for line in response.iter_lines():
                     if line:
                         decoded = line.decode('utf-8').replace('data: ', '')
-                        if decoded == '[DONE]': break
+                        if decoded == '[DONE]': 
+                            break
                         try:
                             chunk = json.loads(decoded)
                             token = chunk['choices'][0]['delta'].get('content', '')
                             if token:
+                                # Streams token back to React for real-time UI updates
                                 yield f"data: {json.dumps({'token': token})}\n\n"
-                        except: continue
+                        except: 
+                            continue
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
@@ -69,4 +85,5 @@ def chat_with_ai():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Local development fallback
     app.run(debug=False, port=5000)
