@@ -200,8 +200,8 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- INTEGRATED BACKEND PROXY AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. If the answer is not in the manuscript text, use your general knowledge to answer. Be direct and concise.") => {
+  // --- INTEGRATED BACKEND PROXY AI ENGINE (Updated for Reasoning) ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. Use the provided text to answer questions deeply.") => {
     setIsAiLoading(true);
     try {
       const response = await fetch("/api/chat", { 
@@ -217,14 +217,16 @@ export default function App() {
       const result = await response.json();
       if (result.error) throw new Error(result.error);
 
-      // Extract the content and clean any leftover dashes
-      let answer = result.choices?.[0]?.message?.content || "No response generated.";
-      return answer.replace(/^-+/g, '').trim(); 
+      // Extract reasoning and final answer from backend object
+      return {
+        answer: (result.answer || "No response generated.").replace(/^-+/g, '').trim(),
+        thought: result.thought || ""
+      };
 
     } catch (err) {
       console.error("AI Proxy Error:", err);
       notify("AI connection failed.", "error");
-      return "AI connection failed.";
+      return { answer: "AI connection failed.", thought: "" };
     } finally {
       setIsAiLoading(false);
     }
@@ -266,12 +268,13 @@ export default function App() {
     if (!user) return notify("Sign in for insights", "error");
     setInsightResult(""); 
     setInsightType(type);
-    let p = ""; let s = "You are a literary analyst.";
+    let p = ""; let s = "You are a literary analyst scholar.";
     if (type === 'summary') p = "Summarize the key events on this page concisely.";
     if (type === 'characters') p = "Identify characters on this page and their current motivations.";
     if (type === 'weaver') p = "Suggest 3 creative plot directions based on the current scene.";
+    
     const res = await callAi(p, s);
-    setInsightResult(res);
+    setInsightResult(res.answer); // In insight tab, we just show the final answer
   };
 
   const notify = (msg, type = 'info') => {
@@ -286,19 +289,23 @@ export default function App() {
     setUserInput("");
     setChatHistory(prev => [...prev, { role: 'user', content: q }]);
 
-    const lowerQ = q.toLowerCase().replace(/\s/g, ''); // Remove spaces to catch 'thankyou'
+    const lowerQ = q.toLowerCase().replace(/\s/g, '');
 
-    // 1. Handle Greetings & Appreciation (Skip API call)
-    const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou', 'great', 'awesome'];
+    // Local Handling for Greetings
+    const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou'];
     if (social.some(s => lowerQ.startsWith(s))) {
-      const reply = lowerQ.includes('thank') ? "You're very welcome! I'm here to help." : "Hello! I'm ready. Ask me anything about the manuscript!";
-      setChatHistory(prev => [...prev, { role: 'bot', content: reply }]);
+      const reply = lowerQ.includes('thank') ? "You're very welcome! Happy to help you with your manuscript." : "Hello! I'm your literary guide. Ask me anything about this story!";
+      setChatHistory(prev => [...prev, { role: 'bot', content: reply, thought: "Greeting handled locally." }]);
       return; 
     }
 
-    // 2. Handle Questions
+    // Call the Reasoning API
     const res = await callAi(q);
-    setChatHistory(prev => [...prev, { role: 'bot', content: res }]);
+    setChatHistory(prev => [...prev, { 
+      role: 'bot', 
+      content: res.answer, 
+      thought: res.thought 
+    }]);
   };
 
   const handleTranslate = async () => {
@@ -306,10 +313,10 @@ export default function App() {
     if (!selection) return notify("Select text to translate", "info");
     const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
     const res = await callAi(
-      `Translate to ${targetLangName}. Return ONLY the result:\n\n${selection.substring(0, 500)}`,
-      `You are a professional literary translator. Reply with ONLY the translation.`
+      `Translate this text to ${targetLangName}. Return ONLY the result:\n\n${selection.substring(0, 500)}`,
+      `You are a professional literary translator.`
     );
-    setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res}` }]);
+    setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res.answer}` }]);
     setActiveTab('chat'); setIsSidebarOpen(true);
   };
 
@@ -473,7 +480,7 @@ export default function App() {
               {activeTab === 'insights' && (
                 <div className="space-y-6">
                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100">
-                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate</label>
+                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate Selection</label>
                     <div className="flex gap-2">
                       <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-xs">
                         {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
@@ -501,28 +508,49 @@ export default function App() {
                       }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 rounded-xl">Add to Chat</button>
                     </div>
                   )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Consulting...</p></div>}
+                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Analyzing Context...</p></div>}
                 </div>
               )}
 
               {activeTab === 'chat' && (
                 <div className="flex flex-col h-full space-y-4">
-                  <div className="flex-1 space-y-4 overflow-y-auto pb-20 custom-scrollbar">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the story...</p></div>}
+                  <div className="flex-1 space-y-6 overflow-y-auto pb-24 custom-scrollbar">
+                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the characters or plot...</p></div>}
+                    
                     {chatHistory.map((m, i) => (
-                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 rounded-tl-none border'}`}>
+                      <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} space-y-2`}>
+                        
+                        {/* REASONING COMPONENT */}
+                        {m.role === 'bot' && m.thought && (
+                          <details className="max-w-[85%] group">
+                            <summary className="text-[10px] font-black uppercase text-zinc-400 cursor-pointer hover:text-amber-500 flex items-center gap-2 list-none bg-zinc-50 dark:bg-zinc-800/30 px-3 py-1 rounded-full border border-zinc-100 dark:border-zinc-800 transition-all">
+                              <BrainCircuit size={12} /> 
+                              <span>AI Logic Process</span>
+                            </summary>
+                            <div className="mt-2 p-4 bg-amber-50/30 dark:bg-amber-900/10 border-l-2 border-amber-500 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400 font-serif italic rounded-r-2xl">
+                              {m.thought}
+                            </div>
+                          </details>
+                        )}
+
+                        {/* MESSAGE BUBBLE */}
+                        <div className={`max-w-[90%] p-4 rounded-[1.5rem] text-sm leading-relaxed ${
+                          m.role === 'user' 
+                          ? 'bg-amber-500 text-white rounded-tr-none shadow-lg shadow-amber-500/10' 
+                          : 'bg-white dark:bg-zinc-900 rounded-tl-none border border-zinc-200 dark:border-zinc-800'
+                        }`}>
                           {m.content}
                         </div>
                       </div>
                     ))}
                   </div>
+                  
                   <div className="fixed md:absolute bottom-[72px] md:bottom-0 left-0 right-0 p-4 bg-white dark:bg-zinc-900 border-t md:border-none z-10">
                     <div className="relative">
                       <input value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleChat()} 
-                        placeholder="Ask AI..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
+                        placeholder="Ask AI scholarly questions..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
                       <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg active:scale-90 transition-all">
-                        <Send size={18}/>
+                        {isAiLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18}/>}
                       </button>
                     </div>
                   </div>
@@ -543,6 +571,7 @@ export default function App() {
         </aside>
       </div>
 
+      {/* MOBILE NAVIGATION BAR */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex justify-around items-center z-[110] px-2 shadow-[0_-8px_30px_rgba(0,0,0,0.1)]">
         <NavItem id="library" icon={Library} label="Library" />
         <NavItem id="insights" icon={Sparkles} label="Magic" />
@@ -554,6 +583,7 @@ export default function App() {
         </button>
       </nav>
 
+      {/* NOTIFICATION TOAST */}
       {notification && (
         <div className={`fixed bottom-20 md:bottom-10 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:max-w-xs p-4 rounded-3xl shadow-2xl z-[200] flex items-center gap-3 animate-in border ${notification.type === 'error' ? 'bg-red-600 text-white' : 'bg-zinc-900 text-white'}`}>
           {notification.type === 'error' ? <AlertCircle size={20}/> : <Check size={20}/>}
@@ -568,6 +598,7 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
         body { margin: 0; padding: 0; }
+        details > summary::-webkit-details-marker { display: none; }
       `}</style>
     </div>
   );
