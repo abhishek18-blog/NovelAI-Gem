@@ -201,8 +201,8 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- REPLACED: FIXED STREAMING AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful assistant.") => {
+  // --- INTEGRATED: FIXED STREAMING AI ENGINE ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful scholarly assistant.") => {
     setIsAiLoading(true);
     const botMsgId = Date.now();
     
@@ -225,21 +225,23 @@ export default function App() {
         })
       });
 
+      // Handle 404 or 504 errors before parsing JSON
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Server Error: ${errText.substring(0, 50)}`);
+        throw new Error(`Server connection failed. ${errText.substring(0, 30)}...`);
       }
 
+      // STREAM READER: Replaces .json() to prevent "Unexpected end of input"
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let fullText = "";
+      let fullContent = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value);
-        const lines = chunk.split('\n\n');
+        const lines = chunk.split('\n\n'); // Split by Server-Sent Event boundary
 
         lines.forEach(line => {
           if (!line.startsWith('data: ')) return;
@@ -248,12 +250,13 @@ export default function App() {
             const token = data.token;
             if (!token) return;
             
-            fullText += token;
+            fullContent += token;
 
+            // Chain of Thought separation for DeepSeek
             let thought = "";
-            let answer = fullText;
-            if (fullText.includes("<think>")) {
-              const parts = fullText.split("</think>");
+            let answer = fullContent;
+            if (fullContent.includes("<think>")) {
+              const parts = fullContent.split("</think>");
               thought = parts[0].replace("<think>", "").trim();
               answer = parts[1] ? parts[1].trim() : "";
             }
@@ -263,13 +266,15 @@ export default function App() {
             setChatHistory(prev => prev.map(msg => 
               msg.id === botMsgId ? { ...msg, content: answer, thought: thought } : msg
             ));
-          } catch (e) {}
+          } catch (e) {
+            // Partial JSON packet; skip until next chunk
+          }
         });
       }
       return finalAnswer; 
     } catch (err) {
       console.error("AI Proxy Error:", err);
-      notify("AI connection failed.", "error");
+      notify("AI connection timed out.", "error");
       setChatHistory(prev => prev.filter(m => m.id !== botMsgId));
       return "";
     } finally {
@@ -316,7 +321,7 @@ export default function App() {
     if (!user) return notify("Sign in for insights", "error");
     setInsightResult(""); 
     setInsightType(type);
-    let p = ""; let s = "You are a literary analyst.";
+    let p = ""; let s = "You are a literary analyst scholar.";
     if (type === 'summary') p = "Summarize the key events on this page concisely.";
     if (type === 'characters') p = "Identify characters on this page and their current motivations.";
     if (type === 'weaver') p = "Suggest 3 creative plot directions based on the current scene.";
@@ -339,11 +344,11 @@ export default function App() {
 
     const lowerQ = q.toLowerCase().replace(/\s/g, ''); 
 
-    // Handle Greetings locally
+    // Handle Greetings Locally
     const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou', 'great', 'awesome'];
     if (social.some(s => lowerQ.startsWith(s))) {
-      const reply = lowerQ.includes('thank') ? "You're very welcome!" : "Hello! How can I help with the manuscript?";
-      setChatHistory(prev => [...prev, { role: 'bot', content: reply, thought: "Local handler" }]);
+      const reply = lowerQ.includes('thank') ? "You're very welcome!" : "Hello! I'm ready. Ask me anything about the manuscript!";
+      setChatHistory(prev => [...prev, { role: 'bot', content: reply, thought: "Handled locally." }]);
       return; 
     }
 
@@ -355,8 +360,8 @@ export default function App() {
     if (!selection) return notify("Select text to translate", "info");
     const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
     await callAi(
-      `Translate to ${targetLangName}. Return ONLY result:\n\n${selection.substring(0, 500)}`,
-      `You are a professional literary translator. Reply ONLY with translation.`
+      `Translate this text to ${targetLangName}:\n\n${selection.substring(0, 500)}`,
+      `You are a professional literary translator. Reply ONLY with the translation.`
     );
     setActiveTab('chat'); setIsSidebarOpen(true);
   };
@@ -545,7 +550,7 @@ export default function App() {
                       }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 rounded-xl">Add to Chat</button>
                     </div>
                   )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Analyzing Context...</p></div>}
+                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Consulting AI...</p></div>}
                 </div>
               )}
 
@@ -565,7 +570,7 @@ export default function App() {
                   </div>
 
                   <div className="flex-1 space-y-6 overflow-y-auto pb-24 custom-scrollbar">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the characters or plot...</p></div>}
+                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the plot...</p></div>}
                     
                     {chatHistory.map((m, i) => (
                       <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} space-y-2`}>
@@ -582,8 +587,8 @@ export default function App() {
                         )}
                         <div className={`max-w-[90%] p-4 rounded-[1.5rem] text-sm leading-relaxed ${
                           m.role === 'user' 
-                          ? 'bg-amber-500 text-white rounded-tr-none shadow-lg shadow-amber-500/10' 
-                          : 'bg-white dark:bg-zinc-900 rounded-tl-none border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all hover:shadow-md'
+                          ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' 
+                          : 'bg-white dark:bg-zinc-900 rounded-tl-none border border-zinc-200 dark:border-zinc-800 shadow-sm'
                         }`}>
                           {m.content}
                           {m.isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-amber-500 animate-pulse rounded-sm" />}
