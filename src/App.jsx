@@ -79,6 +79,7 @@ export default function App() {
   const [insightType, setInsightType] = useState(null);
   const [isPdfReady, setIsPdfReady] = useState(false);
   const [selectedLang, setSelectedLang] = useState('hi');
+  const [chatMode, setChatMode] = useState('strict'); 
   
   const isInitialLoad = useRef(true);
 
@@ -200,33 +201,82 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- INTEGRATED BACKEND PROXY AI ENGINE ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. If the answer is not in the manuscript text, use your general knowledge to answer. Be direct and concise.") => {
+  // --- REPLACED: FIXED STREAMING AI ENGINE ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful assistant.") => {
     setIsAiLoading(true);
+    const botMsgId = Date.now();
+    
+    // Add streaming placeholder
+    setChatHistory(prev => [...prev, { 
+      id: botMsgId, role: 'bot', content: '', thought: '', isStreaming: true 
+    }]);
+
+    let finalAnswer = "";
+
     try {
-      const response = await fetch("/api/chat", { 
+      const response = await fetch("/api/chat", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          systemPrompt: systemPrompt, 
-          prompt: prompt, 
-          context: pages[currentPage] || ""
+          prompt, 
+          systemPrompt,
+          context: pages[currentPage] || "", 
+          mode: chatMode 
         })
       });
 
-      const result = await response.json();
-      if (result.error) throw new Error(result.error);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Server Error: ${errText.substring(0, 50)}`);
+      }
 
-      // Extract the content and clean any leftover dashes
-      let answer = result.choices?.[0]?.message?.content || "No response generated.";
-      return answer.replace(/^-+/g, '').trim(); 
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = "";
 
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n\n');
+
+        lines.forEach(line => {
+          if (!line.startsWith('data: ')) return;
+          try {
+            const data = JSON.parse(line.replace('data: ', ''));
+            const token = data.token;
+            if (!token) return;
+            
+            fullText += token;
+
+            let thought = "";
+            let answer = fullText;
+            if (fullText.includes("<think>")) {
+              const parts = fullText.split("</think>");
+              thought = parts[0].replace("<think>", "").trim();
+              answer = parts[1] ? parts[1].trim() : "";
+            }
+
+            finalAnswer = answer; 
+
+            setChatHistory(prev => prev.map(msg => 
+              msg.id === botMsgId ? { ...msg, content: answer, thought: thought } : msg
+            ));
+          } catch (e) {}
+        });
+      }
+      return finalAnswer; 
     } catch (err) {
       console.error("AI Proxy Error:", err);
       notify("AI connection failed.", "error");
-      return "AI connection failed.";
+      setChatHistory(prev => prev.filter(m => m.id !== botMsgId));
+      return "";
     } finally {
       setIsAiLoading(false);
+      setChatHistory(prev => prev.map(msg => 
+        msg.id === botMsgId ? { ...msg, isStreaming: false } : msg
+      ));
     }
   };
 
@@ -270,8 +320,9 @@ export default function App() {
     if (type === 'summary') p = "Summarize the key events on this page concisely.";
     if (type === 'characters') p = "Identify characters on this page and their current motivations.";
     if (type === 'weaver') p = "Suggest 3 creative plot directions based on the current scene.";
-    const res = await callAi(p, s);
-    setInsightResult(res);
+    
+    const resultText = await callAi(p, s);
+    setInsightResult(resultText);
   };
 
   const notify = (msg, type = 'info') => {
@@ -286,30 +337,27 @@ export default function App() {
     setUserInput("");
     setChatHistory(prev => [...prev, { role: 'user', content: q }]);
 
-    const lowerQ = q.toLowerCase().replace(/\s/g, ''); // Remove spaces to catch 'thankyou'
+    const lowerQ = q.toLowerCase().replace(/\s/g, ''); 
 
-    // 1. Handle Greetings & Appreciation (Skip API call)
+    // Handle Greetings locally
     const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou', 'great', 'awesome'];
     if (social.some(s => lowerQ.startsWith(s))) {
-      const reply = lowerQ.includes('thank') ? "You're very welcome! I'm here to help." : "Hello! I'm ready. Ask me anything about the manuscript!";
-      setChatHistory(prev => [...prev, { role: 'bot', content: reply }]);
+      const reply = lowerQ.includes('thank') ? "You're very welcome!" : "Hello! How can I help with the manuscript?";
+      setChatHistory(prev => [...prev, { role: 'bot', content: reply, thought: "Local handler" }]);
       return; 
     }
 
-    // 2. Handle Questions
-    const res = await callAi(q);
-    setChatHistory(prev => [...prev, { role: 'bot', content: res }]);
+    await callAi(q);
   };
 
   const handleTranslate = async () => {
     const selection = window.getSelection().toString().trim();
     if (!selection) return notify("Select text to translate", "info");
     const targetLangName = LANGUAGES.find(l => l.code === selectedLang)?.name || selectedLang;
-    const res = await callAi(
-      `Translate to ${targetLangName}. Return ONLY the result:\n\n${selection.substring(0, 500)}`,
-      `You are a professional literary translator. Reply with ONLY the translation.`
+    await callAi(
+      `Translate to ${targetLangName}. Return ONLY result:\n\n${selection.substring(0, 500)}`,
+      `You are a professional literary translator. Reply ONLY with translation.`
     );
-    setChatHistory(prev => [...prev, { role: 'bot', content: `**${targetLangName} Translation:**\n\n${res}` }]);
     setActiveTab('chat'); setIsSidebarOpen(true);
   };
 
@@ -322,7 +370,6 @@ export default function App() {
       notify("Signed in with Google", "success");
     } catch (err) {
         notify("Authentication failed", "error");
-        console.error("Google Auth error:", err);
     } finally {
       setIsSigningIn(false);
     }
@@ -374,7 +421,6 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 overflow-hidden relative">
-        {/* DESKTOP SIDEBAR */}
         <nav className="hidden md:flex w-20 border-r border-zinc-200 dark:border-zinc-800 flex-col items-center py-8 gap-8 bg-white dark:bg-zinc-900 z-50">
           <div className="p-3 bg-amber-500 rounded-2xl text-white shadow-lg shadow-amber-500/20 transition-transform hover:scale-105"><BookOpen size={24}/></div>
           <NavItem id="library" icon={Library} label="Library" />
@@ -391,7 +437,6 @@ export default function App() {
           </div>
         </nav>
 
-        {/* READING AREA */}
         <main className="flex-1 overflow-y-auto px-4 md:px-20 py-8 scroll-smooth relative custom-scrollbar bg-zinc-50 dark:bg-zinc-950">
           <div className="max-w-3xl mx-auto">
             <div className="hidden md:flex justify-between items-end border-b border-zinc-200 dark:border-zinc-800 pb-6 mb-12">
@@ -417,7 +462,6 @@ export default function App() {
           </div>
         </main>
 
-        {/* FUNCTIONAL DRAWER */}
         <aside className={`fixed inset-0 md:relative md:inset-auto z-[100] md:z-auto transition-all duration-300 overflow-hidden flex
           ${isSidebarOpen ? 'w-full md:w-[420px]' : 'w-0'}`}>
           <div className="flex-1 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 flex flex-col shadow-2xl md:shadow-none h-full">
@@ -436,7 +480,7 @@ export default function App() {
                       <div className="w-16 h-16 bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center mx-auto text-amber-500 mb-2">
                         <User size={32}/>
                       </div>
-                      <p className="text-sm text-zinc-500 px-4">Sign in with Google to sync manuscripts.</p>
+                      <p className="text-sm text-zinc-500 px-4">Sign in to sync manuscripts.</p>
                       <button onClick={handleGoogleSignIn} disabled={isSigningIn}
                         className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-xs uppercase shadow-lg transition-transform flex items-center justify-center gap-2">
                         {isSigningIn ? <Loader2 className="animate-spin" size={16} /> : <LogIn size={16} />}
@@ -473,7 +517,7 @@ export default function App() {
               {activeTab === 'insights' && (
                 <div className="space-y-6">
                   <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100">
-                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate</label>
+                    <label className="block text-[10px] font-black uppercase text-zinc-500 mb-2">Translate Selection</label>
                     <div className="flex gap-2">
                       <select value={selectedLang} onChange={e => setSelectedLang(e.target.value)} className="flex-1 bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-xs">
                         {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
@@ -501,28 +545,59 @@ export default function App() {
                       }} className="mt-4 w-full py-2.5 text-[9px] font-black uppercase text-amber-600 border border-amber-200 rounded-xl">Add to Chat</button>
                     </div>
                   )}
-                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Consulting...</p></div>}
+                  {isAiLoading && <div className="py-20 text-center"><Loader2 className="animate-spin text-amber-500 mx-auto mb-2"/><p className="text-[10px] font-black text-zinc-400 uppercase">Analyzing Context...</p></div>}
                 </div>
               )}
 
               {activeTab === 'chat' && (
                 <div className="flex flex-col h-full space-y-4">
-                  <div className="flex-1 space-y-4 overflow-y-auto pb-20 custom-scrollbar">
-                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the story...</p></div>}
+                  <div className="flex items-center justify-between p-2 mb-4 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                    <div className="flex items-center gap-2 px-2">
+                      <BrainCircuit size={14} className={chatMode === 'strict' ? 'text-amber-500' : 'text-zinc-400'} />
+                      <span className="text-[9px] font-black uppercase tracking-widest">Mode: {chatMode}</span>
+                    </div>
+                    <button 
+                      onClick={() => setChatMode(m => m === 'strict' ? 'global' : 'strict')}
+                      className="text-[9px] font-black uppercase bg-amber-500 text-white px-3 py-1 rounded-lg shadow-sm active:scale-95 transition-transform"
+                    >
+                      Switch to {chatMode === 'strict' ? 'Global' : 'Strict'}
+                    </button>
+                  </div>
+
+                  <div className="flex-1 space-y-6 overflow-y-auto pb-24 custom-scrollbar">
+                    {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the characters or plot...</p></div>}
+                    
                     {chatHistory.map((m, i) => (
-                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] p-4 rounded-3xl text-sm ${m.role === 'user' ? 'bg-amber-500 text-white rounded-tr-none shadow-lg' : 'bg-zinc-100 dark:bg-zinc-800 rounded-tl-none border'}`}>
+                      <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'} space-y-2`}>
+                        {m.role === 'bot' && m.thought && (
+                          <details className="max-w-[85%] group">
+                            <summary className="text-[10px] font-black uppercase text-zinc-400 cursor-pointer hover:text-amber-500 flex items-center gap-2 list-none bg-zinc-50 dark:bg-zinc-800/30 px-3 py-1 rounded-full border border-zinc-100 dark:border-zinc-800 transition-all">
+                              <BrainCircuit size={12} /> 
+                              <span>AI Logic Process</span>
+                            </summary>
+                            <div className="mt-2 p-4 bg-amber-50/30 dark:bg-amber-900/10 border-l-2 border-amber-500 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400 font-serif italic rounded-r-2xl">
+                              {m.thought}
+                            </div>
+                          </details>
+                        )}
+                        <div className={`max-w-[90%] p-4 rounded-[1.5rem] text-sm leading-relaxed ${
+                          m.role === 'user' 
+                          ? 'bg-amber-500 text-white rounded-tr-none shadow-lg shadow-amber-500/10' 
+                          : 'bg-white dark:bg-zinc-900 rounded-tl-none border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all hover:shadow-md'
+                        }`}>
                           {m.content}
+                          {m.isStreaming && <span className="inline-block w-2 h-4 ml-1 bg-amber-500 animate-pulse rounded-sm" />}
                         </div>
                       </div>
                     ))}
                   </div>
+                  
                   <div className="fixed md:absolute bottom-[72px] md:bottom-0 left-0 right-0 p-4 bg-white dark:bg-zinc-900 border-t md:border-none z-10">
                     <div className="relative">
                       <input value={userInput} onChange={e=>setUserInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleChat()} 
-                        placeholder="Ask AI..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
+                        placeholder="Ask AI scholarly questions..." className="w-full p-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl text-sm focus:ring-2 focus:ring-amber-500 outline-none shadow-inner" />
                       <button onClick={handleChat} disabled={isAiLoading || !userInput.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-white rounded-xl shadow-lg active:scale-90 transition-all">
-                        <Send size={18}/>
+                        {isAiLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18}/>}
                       </button>
                     </div>
                   </div>
@@ -568,6 +643,7 @@ export default function App() {
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.05); border-radius: 10px; }
         body { margin: 0; padding: 0; }
+        details > summary::-webkit-details-marker { display: none; }
       `}</style>
     </div>
   );
