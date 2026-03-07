@@ -7,7 +7,6 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app) 
 
-# Strips whitespace to prevent auth errors
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 @app.route('/api/chat', methods=['POST'])
@@ -24,20 +23,20 @@ def chat_with_ai():
         mode = data.get('mode', 'strict')
 
         def generate():
-            # Prompt grounding to prevent hallucinations like the 'Draupadi' issue
+            # Instructions to force the model to think and stay grounded
             if mode == 'strict':
-                sys_msg = "STRICT: Use ONLY the text. Think in <think> tags. If missing, say you don't know."
+                sys_msg = "STRICT MODE: Use ONLY the manuscript. Think in <think> tags. If missing, say you don't know."
             else:
-                sys_msg = "GLOBAL: Use text + your brain. Think in <think> tags."
+                sys_msg = "GLOBAL MODE: Use text + your brain. Think in <think> tags."
 
             payload = {
                 "model": "deepseek-r1-distill-llama-70b",
                 "messages": [
                     {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": f"CONTEXT:\n{raw_context[:5000]}\n\nQUESTION: {user_q}"}
+                    {"role": "user", "content": f"MANUSCRIPT:\n{raw_context[:6000]}\n\nQUESTION: {user_q}"}
                 ],
                 "temperature": 0.6,
-                "stream": True # Keeps connection alive past the 10s Vercel limit
+                "stream": True 
             }
 
             response = requests.post(
@@ -48,6 +47,7 @@ def chat_with_ai():
                 timeout=90 
             )
 
+            # STREAMING ENGINE
             for line in response.iter_lines():
                 if line:
                     decoded = line.decode('utf-8').replace('data: ', '')
@@ -56,7 +56,7 @@ def chat_with_ai():
                         chunk = json.loads(decoded)
                         token = chunk['choices'][0]['delta'].get('content', '')
                         if token:
-                            # Immediate yield to flush the buffer
+                            # Flush data to the browser
                             yield f"data: {json.dumps({'token': token})}\n\n"
                     except: continue
 
