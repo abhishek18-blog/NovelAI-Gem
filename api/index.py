@@ -1,69 +1,48 @@
+Pythom.py
+
 import os
 import requests
-import json
-from flask import Flask, request, Response, stream_with_context, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app) 
+CORS(app)
 
-GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
     if not GROQ_KEY:
-        def key_err(): 
-            yield f"data: {json.dumps({'error': 'GROQ_API_KEY missing in Vercel settings'})}\n\n"
-        return Response(stream_with_context(key_err()), mimetype='text/event-stream')
+        return jsonify({"error": "GROQ_API_KEY missing"}), 500
 
     try:
         data = request.get_json()
-        user_q = data.get('prompt', '')
-        raw_context = data.get('context', '')
-        mode = data.get('mode', 'strict')
+        sys_msg = data.get('systemPrompt', "You are a helpful assistant.")
+        user_q = data.get('prompt', 'Hello')
+        context = data.get('context', '')
 
-        def generate():
-            # Instructions to force the model to think and stay grounded
-            if mode == 'strict':
-                sys_msg = "STRICT MODE: Use ONLY the manuscript. Think in <think> tags. If missing, say you don't know."
-            else:
-                sys_msg = "GLOBAL MODE: Use text + your brain. Think in <think> tags."
-
-            payload = {
-                "model": "deepseek-r1-distill-llama-70b",
+        response = requests.post(
+            url="https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+            json={
+             "model": "deepseek-r1-distill-llama-70b"
                 "messages": [
-                    {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": f"MANUSCRIPT:\n{raw_context[:6000]}\n\nQUESTION: {user_q}"}
+                    {
+                        "role": "system", 
+                        "content": f"{sys_msg} RULE: Answer the question directly. Never repeat context. Never use dashes or ### markers."
+                    },
+                    {
+                        "role": "user", 
+                        "content": f"MANUSCRIPT:\n\"\"\"{context}\"\"\"\n\nQUESTION: {user_q}"
+                    }
                 ],
-                "temperature": 0.6,
-                "stream": True 
-            }
-
-            response = requests.post(
-                url="https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-                json=payload,
-                stream=True,
-                timeout=90 
-            )
-
-            # STREAMING ENGINE
-            for line in response.iter_lines():
-                if line:
-                    decoded = line.decode('utf-8').replace('data: ', '')
-                    if decoded == '[DONE]': break
-                    try:
-                        chunk = json.loads(decoded)
-                        token = chunk['choices'][0]['delta'].get('content', '')
-                        if token:
-                            # Flush data to the browser
-                            yield f"data: {json.dumps({'token': token})}\n\n"
-                    except: continue
-
-        return Response(stream_with_context(generate()), mimetype='text/event-stream')
+                "temperature": 0.0, # 0.0 is the most stable setting possible
+                "stop": ["###", "---", "MANUSCRIPT:"] # Prevents markers from leaking
+            },
+            timeout=15 
+        )
+        
+        return jsonify(response.json())
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(debug=False, port=5000)
