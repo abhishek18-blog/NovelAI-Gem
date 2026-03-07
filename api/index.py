@@ -1,4 +1,3 @@
-Pythom.py
 
 import os
 import requests
