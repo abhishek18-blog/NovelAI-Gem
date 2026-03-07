@@ -80,6 +80,9 @@ export default function App() {
   const [isPdfReady, setIsPdfReady] = useState(false);
   const [selectedLang, setSelectedLang] = useState('hi');
   
+  // NEW: Mode Toggle State
+  const [chatMode, setChatMode] = useState('strict'); 
+  
   const isInitialLoad = useRef(true);
 
   // --- THEME ENGINE ---
@@ -200,8 +203,8 @@ export default function App() {
     }
   }, [pages]);
 
-  // --- INTEGRATED BACKEND PROXY AI ENGINE (Updated for Reasoning) ---
-  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant. Use the provided text to answer questions deeply.") => {
+  // --- UPDATED AI ENGINE (Integrated Mode & Optimized Context) ---
+  const callAi = async (prompt, systemPrompt = "You are a helpful literary assistant.") => {
     setIsAiLoading(true);
     try {
       const response = await fetch("/api/chat", { 
@@ -210,23 +213,22 @@ export default function App() {
         body: JSON.stringify({ 
           systemPrompt: systemPrompt, 
           prompt: prompt, 
-          context: pages[currentPage] || ""
+          context: pages[currentPage] || "", // Only sending the current page for optimization
+          mode: chatMode 
         })
       });
 
       const result = await response.json();
       if (result.error) throw new Error(result.error);
 
-      // Extract reasoning and final answer from backend object
       return {
         answer: (result.answer || "No response generated.").replace(/^-+/g, '').trim(),
         thought: result.thought || ""
       };
-
     } catch (err) {
       console.error("AI Proxy Error:", err);
-      notify("AI connection failed.", "error");
-      return { answer: "AI connection failed.", thought: "" };
+      notify("Connection error", "error");
+      return { answer: "Failed to connect to backend.", thought: "" };
     } finally {
       setIsAiLoading(false);
     }
@@ -274,7 +276,7 @@ export default function App() {
     if (type === 'weaver') p = "Suggest 3 creative plot directions based on the current scene.";
     
     const res = await callAi(p, s);
-    setInsightResult(res.answer); // In insight tab, we just show the final answer
+    setInsightResult(res.answer);
   };
 
   const notify = (msg, type = 'info') => {
@@ -290,8 +292,6 @@ export default function App() {
     setChatHistory(prev => [...prev, { role: 'user', content: q }]);
 
     const lowerQ = q.toLowerCase().replace(/\s/g, '');
-
-    // Local Handling for Greetings
     const social = ['hi', 'hello', 'hey', 'namaste', 'thanks', 'thankyou'];
     if (social.some(s => lowerQ.startsWith(s))) {
       const reply = lowerQ.includes('thank') ? "You're very welcome! Happy to help you with your manuscript." : "Hello! I'm your literary guide. Ask me anything about this story!";
@@ -299,7 +299,6 @@ export default function App() {
       return; 
     }
 
-    // Call the Reasoning API
     const res = await callAi(q);
     setChatHistory(prev => [...prev, { 
       role: 'bot', 
@@ -514,6 +513,20 @@ export default function App() {
 
               {activeTab === 'chat' && (
                 <div className="flex flex-col h-full space-y-4">
+                  {/* MODE TOGGLE BAR */}
+                  <div className="flex items-center justify-between p-2 mb-4 bg-zinc-100 dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                    <div className="flex items-center gap-2 px-2">
+                      <BrainCircuit size={14} className={chatMode === 'strict' ? 'text-amber-500' : 'text-zinc-400'} />
+                      <span className="text-[9px] font-black uppercase tracking-widest">Mode: {chatMode}</span>
+                    </div>
+                    <button 
+                      onClick={() => setChatMode(m => m === 'strict' ? 'global' : 'strict')}
+                      className="text-[9px] font-black uppercase bg-amber-500 text-white px-3 py-1 rounded-lg shadow-sm active:scale-95 transition-transform"
+                    >
+                      Switch to {chatMode === 'strict' ? 'Global' : 'Strict'}
+                    </button>
+                  </div>
+
                   <div className="flex-1 space-y-6 overflow-y-auto pb-24 custom-scrollbar">
                     {chatHistory.length === 0 && <div className="py-20 text-center opacity-30"><MessageSquare size={48} className="mx-auto mb-4" /><p className="text-[10px] font-black uppercase">Ask AI about the characters or plot...</p></div>}
                     
