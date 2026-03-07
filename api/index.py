@@ -1,16 +1,13 @@
 import os
 import requests
-from flask import Flask, request, jsonify
+import json
+from flask import Flask, request, Response, stream_with_context
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
 GROQ_KEY = os.getenv("GROQ_API_KEY", "")
-
-def get_optimized_context(text, max_chars=5000):
-    """Truncates text to roughly 1200-1500 tokens to keep things fast."""
-    return text[:max_chars] + "..." if len(text) > max_chars else text
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
@@ -21,38 +18,50 @@ def chat_with_ai():
         data = request.get_json()
         user_q = data.get('prompt', '')
         raw_context = data.get('context', '')
-        mode = data.get('mode', 'strict') # 'strict' (PDF only) or 'global' (AI brain)
+        mode = data.get('mode', 'strict')
 
-        # Optimize the context before sending to Groq
-        context = get_optimized_context(raw_context)
+        # Use the specialized reasoning model
+        MODEL_ID = "deepseek-r1-distill-llama-70b"
 
-        if mode == 'strict':
-            sys_msg = "STRICT MODE: Use ONLY the provided text. If not there, say you don't know. NO external facts."
-            temp = 0.0
-        else:
-            sys_msg = "GLOBAL MODE: Use the text as a primary source, but feel free to use your own knowledge."
-            temp = 0.7
+        def generate():
+            # Instructions to force the model to stay in character
+            sys_msg = (
+                "You are a strict scholarly assistant. Use ONLY the provided manuscript. "
+                "You must THINK step-by-step using <think> tags. If information is missing, admit it."
+            ) if mode == 'strict' else "You are a literary analyst. Think then answer."
 
-        response = requests.post(
-            url="https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": "llama-3.3-70b-versatile",
+            payload = {
+                "model": MODEL_ID,
                 "messages": [
                     {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": f"CONTEXT:\n{context}\n\nQUESTION: {user_q}"}
+                    {"role": "user", "content": f"CONTEXT:\n{raw_context[:5000]}\n\nQUESTION: {user_q}"}
                 ],
-                "temperature": temp,
-                "max_tokens": 1024
-            },
-            timeout=10 # Perfect for Vercel Hobby tier
-        )
+                "temperature": 0.6,
+                "stream": True # CRITICAL: Enables streaming tokens
+            }
 
-        res_json = response.json()
-        return jsonify({
-            "answer": res_json['choices'][0]['message']['content'],
-            "thought": f"Optimized context sent in {mode} mode."
-        })
+            response = requests.post(
+                url="https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+                json=payload,
+                stream=True
+            )
+
+            for line in response.iter_lines():
+                if line:
+                    decoded_line = line.decode('utf-8').replace('data: ', '')
+                    if decoded_line == '[DONE]':
+                        break
+                    try:
+                        chunk = json.loads(decoded_line)
+                        token = chunk['choices'][0]['delta'].get('content', '')
+                        if token:
+                            # Send token to React
+                            yield f"data: {json.dumps({'token': token})}\n\n"
+                    except:
+                        continue
+
+        return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
