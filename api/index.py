@@ -38,7 +38,7 @@ def chat_with_ai():
                 "Content-Type": "application/json"
             },
             json={
-                "model": "deepseek-r1-distill-llama-70b",
+                "model": "llama-3.3-70b-versatile",
                 "messages": [
                     {
                         "role": "system", 
