@@ -5,15 +5,13 @@ from flask import Flask, request, Response, stream_with_context, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-# CORS is set to allow all origins for production stability
 CORS(app) 
 
-# Stripping whitespace to ensure the key is read correctly from environment
+# Strips whitespace to prevent auth errors
 GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
-    # Production Error Handling: Sends error as a stream chunk so frontend doesn't crash
     if not GROQ_KEY:
         def key_err(): 
             yield f"data: {json.dumps({'error': 'GROQ_API_KEY missing in Vercel settings'})}\n\n"
@@ -25,70 +23,47 @@ def chat_with_ai():
         raw_context = data.get('context', '')
         mode = data.get('mode', 'strict')
 
-        # DeepSeek-R1 model for step-by-step reasoning
-        MODEL_ID = "deepseek-r1-distill-llama-70b"
-
         def generate():
-            # Strengthened system prompts to enforce the use of <think> tags
+            # Prompt grounding to prevent hallucinations like the 'Draupadi' issue
             if mode == 'strict':
-                sys_msg = (
-                    "STRICT MODE: Use ONLY the provided manuscript. "
-                    "You MUST think step-by-step inside <think> tags before answering. "
-                    "If information isn't in the text, say you don't know."
-                )
+                sys_msg = "STRICT: Use ONLY the text. Think in <think> tags. If missing, say you don't know."
             else:
-                sys_msg = (
-                    "GLOBAL MODE: Use the manuscript + your knowledge. "
-                    "You MUST think step-by-step inside <think> tags to compare your knowledge with the text."
-                )
+                sys_msg = "GLOBAL: Use text + your brain. Think in <think> tags."
 
             payload = {
-                "model": MODEL_ID,
+                "model": "deepseek-r1-distill-llama-70b",
                 "messages": [
                     {"role": "system", "content": sys_msg},
-                    {"role": "user", "content": f"MANUSCRIPT:\n{raw_context[:6000]}\n\nQUESTION: {user_q}"}
+                    {"role": "user", "content": f"CONTEXT:\n{raw_context[:5000]}\n\nQUESTION: {user_q}"}
                 ],
                 "temperature": 0.6,
-                "stream": True # Keeps connection alive during the reasoning process
+                "stream": True # Keeps connection alive past the 10s Vercel limit
             }
 
-            try:
-                # 90s timeout allows enough time for deep reasoning on long contexts
-                response = requests.post(
-                    url="https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {GROQ_KEY}", 
-                        "Content-Type": "application/json"
-                    },
-                    json=payload,
-                    stream=True,
-                    timeout=90 
-                )
+            response = requests.post(
+                url="https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+                json=payload,
+                stream=True,
+                timeout=90 
+            )
 
-                for line in response.iter_lines():
-                    if line:
-                        # Clean the SSE prefix from Groq
-                        decoded = line.decode('utf-8').replace('data: ', '')
-                        if decoded == '[DONE]': 
-                            break
-                        try:
-                            chunk = json.loads(decoded)
-                            token = chunk['choices'][0]['delta'].get('content', '')
-                            if token:
-                                # Wrap token in JSON and yield immediately to flush buffer
-                                yield f"data: {json.dumps({'token': token})}\n\n"
-                        except: 
-                            continue
-            except Exception as e:
-                # Catch mid-stream errors
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            for line in response.iter_lines():
+                if line:
+                    decoded = line.decode('utf-8').replace('data: ', '')
+                    if decoded == '[DONE]': break
+                    try:
+                        chunk = json.loads(decoded)
+                        token = chunk['choices'][0]['delta'].get('content', '')
+                        if token:
+                            # Immediate yield to flush the buffer
+                            yield f"data: {json.dumps({'token': token})}\n\n"
+                    except: continue
 
         return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
     except Exception as e:
-        # Fallback for initial request errors
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # Default port for Flask local testing
     app.run(debug=False, port=5000)
