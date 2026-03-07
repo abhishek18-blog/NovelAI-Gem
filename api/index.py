@@ -4,27 +4,33 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
+
+# Enabling CORS allows your React frontend (usually on port 5173) 
+# to talk to this Python backend (usually on port 5000)
 CORS(app)
 
+# Ensure your GROQ_API_KEY is set in your environment variables
 GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
+    """
+    Main endpoint for Novel Quest. 
+    Receives manuscript context and user questions.
+    """
     if not GROQ_KEY:
-        return jsonify({"error": "GROQ_API_KEY missing from server environment"}), 500
+        return jsonify({"error": "GROQ_API_KEY is not set on the server."}), 500
 
     try:
         data = request.get_json()
-        # Specialized prompt for Literature/Story Analysis
-        sys_msg = data.get('systemPrompt', (
-            "You are a literary analysis expert. Use the provided text to answer questions. "
-            "Think deeply about character motives and plot before answering. "
-            "If the answer isn't in the text, say you don't know."
-        ))
-        user_q = data.get('prompt', 'Hello')
-        context = data.get('context', '')
+        
+        # Extract inputs from the React frontend
+        system_prompt = data.get('systemPrompt', "You are a literary scholar.")
+        user_query = data.get('prompt', '')
+        context_text = data.get('context', '')
 
-        # The API request to Groq
+        # Construct the Groq API call
+        # We use the deepseek-r1-distill-llama-70b for reasoning
         response = requests.post(
             url="https://api.groq.com/openai/v1/chat/completions",
             headers={
@@ -32,39 +38,60 @@ def chat_with_ai():
                 "Content-Type": "application/json"
             },
             json={
-                "model": "deepseek-r1-distill-llama-70b", # FIXED: Added the missing comma here
+                "model": "deepseek-r1-distill-llama-70b",
                 "messages": [
-                    {"role": "system", "content": sys_msg},
+                    {
+                        "role": "system", 
+                        "content": f"{system_prompt} Answer based strictly on the provided manuscript. Think deeply before replying."
+                    },
                     {
                         "role": "user", 
-                        "content": f"MANUSCRIPT:\n\"\"\"{context}\"\"\"\n\nQUESTION: {user_q}"
+                        "content": f"MANUSCRIPT CONTEXT:\n\"\"\"{context_text}\"\"\"\n\nUSER QUESTION: {user_query}"
                     }
                 ],
-                "temperature": 0.6,
+                "temperature": 0.6, # Recommended for reasoning models
                 "top_p": 0.95
             },
-            timeout=60 # Reasoning models need more time to 'think'
+            timeout=90 # Reasoning takes time; don't let the connection drop!
         )
 
-        # Check if Groq returned an error (e.g., Rate Limit or Invalid Key)
+        # Handle API Errors (e.g., Rate Limits)
         if response.status_code != 200:
             return jsonify({
-                "error": "Groq API Error",
+                "error": "Groq API Error", 
                 "details": response.text
             }), response.status_code
 
         res_json = response.json()
+        raw_content = res_json['choices'][0]['message']['content']
 
-        # Safety check: Ensure 'choices' exists before accessing it
-        if "choices" in res_json:
-            return jsonify(res_json)
-        else:
-            return jsonify({"error": "Unexpected API response format", "raw": res_json}), 500
+        # --- REASONING EXTRACTION LOGIC ---
+        # DeepSeek-R1 outputs reasoning inside <think>...</think> tags.
+        # We split these so the frontend can display them separately.
+        thought_process = ""
+        final_answer = raw_content
+
+        if "<think>" in raw_content:
+            try:
+                # Splitting by the closing tag
+                parts = raw_content.split("</think>")
+                # The part before </think> is the "thought"
+                thought_process = parts[0].replace("<think>", "").strip()
+                # The part after </think> is the "answer"
+                final_answer = parts[1].strip()
+            except IndexError:
+                # Fallback if the model cuts off
+                final_answer = raw_content
+
+        return jsonify({
+            "answer": final_answer,
+            "thought": thought_process
+        })
 
     except Exception as e:
-        # This catches Python crashes and tells you EXACTLY what went wrong
-        print(f"Server Crash Error: {str(e)}")
-        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
+        print(f"Server Error: {str(e)}")
+        return jsonify({"error": f"Internal Server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
+    # Running on port 5000 by default
     app.run(debug=True, port=5000)
